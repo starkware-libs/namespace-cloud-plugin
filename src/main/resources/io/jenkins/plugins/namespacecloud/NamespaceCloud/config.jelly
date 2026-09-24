@@ -21,7 +21,7 @@
 
   <f:validateButton title="${%Test connection}" progress="${%Checking…}"
                     method="testConnection"
-                    with="region,computeEndpointOverride,credentialsId"/>
+                    with="region,computeEndpointOverride,registryPrefix,credentialsId"/>
 
   <f:section title="${%Required permissions}">
     <f:entry>

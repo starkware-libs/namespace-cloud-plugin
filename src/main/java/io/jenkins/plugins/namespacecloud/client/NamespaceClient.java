@@ -301,6 +301,81 @@ public final class NamespaceClient implements Closeable {
         return refs;
     }
 
+    /** Outcome of checking a configured workspace prefix against the registry. */
+    public enum PrefixCheck {
+        /** The registry served this repository path, so the prefix is right. */
+        VERIFIED,
+        /** The registry refused the path; the prefix is almost certainly wrong. */
+        REJECTED,
+        /** No repositories to test against, or the registry could not be reached. */
+        INCONCLUSIVE
+    }
+
+    /**
+     * Checks a workspace prefix by asking the registry for a repository that is
+     * known to exist.
+     *
+     * <p>The gRPC registry API cannot do this: it is tenant-scoped by the token
+     * and never reports the tenant id, so a wrong prefix is indistinguishable
+     * there. The Docker registry HTTP API can, because the prefix is part of the
+     * path: {@code nscr.io/<prefix>/<repo>}.
+     *
+     * <p>Deliberately returns {@link PrefixCheck#INCONCLUSIVE} rather than
+     * failing when anything is unexpected. A wrong answer here would block a
+     * correct configuration, which is worse than not checking at all.
+     */
+    public PrefixCheck verifyWorkspacePrefix(@NonNull Secret token, @NonNull String prefix) {
+        if (prefix.isBlank()) {
+            return PrefixCheck.INCONCLUSIVE;
+        }
+        String repository;
+        try {
+            List<Registry.Repository> repos = ContainerRegistryServiceGrpc.newBlockingStub(registryChannel())
+                    .withCallCredentials(credentials)
+                    .withDeadlineAfter(20, TimeUnit.SECONDS)
+                    .listRepositories(Registry.ListRepositoriesRequest.newBuilder()
+                            .setMaxEntries(1)
+                            .build())
+                    .getRepositoriesList();
+            if (repos.isEmpty()) {
+                return PrefixCheck.INCONCLUSIVE;
+            }
+            repository = repos.get(0).getName();
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, e, () -> "Could not list repositories to verify the workspace prefix");
+            return PrefixCheck.INCONCLUSIVE;
+        }
+
+        try {
+            java.net.URL url = java.net
+                    .URI
+                    .create("https://" + REGISTRY_HOST + "/v2/" + prefix.trim() + "/" + repository + "/tags/list")
+                    .toURL();
+            java.net.HttpURLConnection c = (java.net.HttpURLConnection) url.openConnection();
+            c.setRequestMethod("GET");
+            c.setConnectTimeout(10_000);
+            c.setReadTimeout(10_000);
+            // nscr.io answers with Basic realm="registry"; the tenant token is
+            // the password, as `nsc docker login` configures.
+            String basic = java.util.Base64.getEncoder()
+                    .encodeToString(
+                            ("token:" + token.getPlainText()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            c.setRequestProperty("Authorization", "Basic " + basic);
+            int code = c.getResponseCode();
+            c.disconnect();
+            if (code == 200) {
+                return PrefixCheck.VERIFIED;
+            }
+            if (code == 401 || code == 403 || code == 404) {
+                return PrefixCheck.REJECTED;
+            }
+            return PrefixCheck.INCONCLUSIVE;
+        } catch (java.io.IOException | RuntimeException e) {
+            LOGGER.log(Level.FINE, e, () -> "Registry prefix check could not complete");
+            return PrefixCheck.INCONCLUSIVE;
+        }
+    }
+
     /** Converts an absolute wall-clock deadline into the protobuf type the API expects. */
     public static Timestamp toTimestamp(@NonNull Instant when) {
         return Timestamp.newBuilder()

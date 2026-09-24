@@ -580,6 +580,51 @@ public class NamespaceCloud extends Cloud {
                     .includeCurrentValue(credentialsId);
         }
 
+        /**
+         * Validates the Project ID, including against the registry itself.
+         *
+         * <p>Format errors are caught locally; correctness is checked by asking
+         * the registry for a repository known to exist, because the gRPC API is
+         * tenant-scoped by the token and cannot reveal a wrong prefix.
+         */
+        @RequirePOST
+        public FormValidation doCheckRegistryPrefix(
+                @QueryParameter String value, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            String v = value == null ? "" : value.trim();
+            if (v.isEmpty()) {
+                return FormValidation.warning("Without this the agent-image list cannot build pullable references. "
+                        + "Find it with: nsc registry list");
+            }
+            if (v.contains("/") || v.contains(":") || v.contains("nscr.io")) {
+                return FormValidation.error("Just the workspace id, not a full image reference. For "
+                        + "nscr.io/abc012abc012/jenkins-agent:1.0 the id is abc012abc012");
+            }
+            if (!v.matches("[a-z0-9]+")) {
+                return FormValidation.error("Expected lowercase letters and digits only.");
+            }
+
+            Secret token = resolveToken(credentialsId);
+            if (token == null) {
+                return FormValidation.ok("Select a token above to verify this against the registry.");
+            }
+            try (NamespaceClient client = new NamespaceClient(
+                    NamespaceClient.computeEndpointForRegion(NamespaceClient.DEFAULT_REGION), token)) {
+                switch (client.verifyWorkspacePrefix(token, v)) {
+                    case VERIFIED:
+                        return FormValidation.ok("Verified against the registry.");
+                    case REJECTED:
+                        return FormValidation.error("The registry does not serve nscr.io/" + v
+                                + "/... with this token. Check it with: nsc registry list");
+                    default:
+                        return FormValidation.warning("Could not verify: no images in the registry yet, or it could "
+                                + "not be reached. The id may still be correct.");
+                }
+            } catch (RuntimeException e) {
+                return FormValidation.warning("Could not verify the id right now.");
+            }
+        }
+
         public ListBoxModel doFillRegionItems() {
             ListBoxModel m = new ListBoxModel();
             m.add("US \u2014 us.compute.namespaceapis.com", "us");
@@ -610,6 +655,7 @@ public class NamespaceCloud extends Cloud {
         public FormValidation doTestConnection(
                 @QueryParameter String region,
                 @QueryParameter String computeEndpointOverride,
+                @QueryParameter String registryPrefix,
                 @QueryParameter String credentialsId) {
             Jenkins.get().checkPermission(Jenkins.ADMINISTER);
 
@@ -641,8 +687,25 @@ public class NamespaceCloud extends Cloud {
                             + "<br/><br/>Re-mint it with:<pre>"
                             + hudson.Util.escape(RequiredGrants.nscCommand(false)) + "</pre>");
                 }
+                // The token can be perfectly valid while the Project ID is
+                // wrong; without this the mistake only surfaces much later as
+                // "failed to resolve image" during a build.
+                String prefixNote;
+                switch (client.verifyWorkspacePrefix(token, registryPrefix == null ? "" : registryPrefix.trim())) {
+                    case VERIFIED:
+                        prefixNote = "<br/>\u2713 Project ID verified against the registry.";
+                        break;
+                    case REJECTED:
+                        prefixNote = "<br/>\u2717 <b>Project ID looks wrong</b>: the registry does not serve nscr.io/"
+                                + hudson.Util.escape(String.valueOf(registryPrefix))
+                                + "/... with this token. Builds would fail with \"failed to resolve image\".";
+                        break;
+                    default:
+                        prefixNote = "<br/><span style=\"color:#777\">Project ID not verified: no images in the "
+                                + "registry yet, or it could not be reached.</span>";
+                }
                 return FormValidation.okWithMarkup("Connected to <code>" + hudson.Util.escape(computeHost)
-                        + "</code>. All required instance actions granted." + rows);
+                        + "</code>. All required instance actions granted." + rows + prefixNote);
             } catch (StatusRuntimeException e) {
                 return describeFailure(e, computeHost);
             } catch (RuntimeException e) {
