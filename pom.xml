@@ -11,7 +11,7 @@
 
   <groupId>io.jenkins.plugins</groupId>
   <artifactId>namespace-cloud</artifactId>
-  <version>1.0-SNAPSHOT</version>
+  <version>${changelist}</version>
   <packaging>hpi</packaging>
 
   <name>Namespace Cloud Agents</name>
@@ -53,6 +53,10 @@
   </issueManagement>
 
   <properties>
+    <!-- Continuous delivery: the real version is substituted by the
+         incrementals build at release time. See
+         https://www.jenkins.io/doc/developer/publishing/releasing-cd/ -->
+    <changelist>999999-SNAPSHOT</changelist>
     <jenkins.baseline>2.516</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <grpc.version>1.84.0</grpc.version>
