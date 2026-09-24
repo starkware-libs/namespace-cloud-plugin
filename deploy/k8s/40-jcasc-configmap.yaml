@@ -1,0 +1,54 @@
+# Configuration as Code. This is what stops the controller coming up
+# unauthenticated the way the local test container did — the security realm is
+# part of the deployment, not a post-install click.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-casc
+  namespace: jenkins-ns
+data:
+  jenkins.yaml: |
+    jenkins:
+      systemMessage: "Namespace Cloud controller — agents run on namespace.so"
+      numExecutors: 0          # never build on the controller
+
+      # NOTE: securityRealm is deliberately NOT managed here.
+      #
+      # JCasC re-applies on every restart, so declaring the admin user would
+      # reset the password to whatever the ConfigMap holds -- overwriting a
+      # password changed through the UI, and setting an EMPTY password if the
+      # ConfigMap value is blank. On a publicly reachable controller that is a
+      # serious failure mode.
+      #
+      # The security realm is bootstrapped once (see deploy/README.md) and then
+      # owned by Jenkins in JENKINS_HOME. Authorization is still pinned below,
+      # since that cannot lock anyone out.
+      authorizationStrategy:
+        loggedInUsersCanDoAnything:
+          allowAnonymousRead: false
+
+      # NOTE: no `clouds:` block here on purpose.
+      #
+      # JCasC resolves the `namespace:` symbol at startup, and that symbol only
+      # exists once namespace-cloud.hpi is installed. Declaring the cloud here
+      # would make the very first boot fail, before you have had a chance to
+      # upload the plugin. Configure the cloud through the UI after uploading
+      # (Manage Jenkins -> Clouds), which is the flow you will use in
+      # production anyway.
+      #
+      # Once the plugin is installed you can make it declarative by pasting the
+      # block from deploy/k8s/jcasc-cloud-snippet.yaml in here and restarting.
+
+    # NOTE: the Namespace token credential is likewise not managed here, for
+    # the same reason: a blank ConfigMap value would silently replace a working
+    # token with an empty secret on the next restart. Create it once in the UI
+    # (Manage Jenkins -> Credentials -> Secret text), or switch to an
+    # ExternalSecret and re-enable this block.
+
+    unclassified:
+      location:
+        # MUST be the externally reachable URL: it is injected into each agent
+        # as JENKINS_URL, and the agent resolves it from inside Namespace's
+        # cloud. Anything cluster-internal will not work.
+        url: "https://jenkins.example.com/"            # TODO your externally reachable URL
+        adminAddress: "admin@example.com"              # TODO your address

@@ -1,0 +1,11 @@
+<div>
+  Space-separated Jenkins labels this profile serves. A job asking for one of
+  them triggers provisioning:
+  <pre>pipeline {
+    agent { label 'linux-2x4' }
+}</pre>
+  <p>
+    <b>This is the label, not the cloud's name.</b> Requesting the cloud name
+    matches nothing and the build waits in the queue indefinitely.
+  </p>
+</div>

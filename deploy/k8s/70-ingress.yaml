@@ -1,0 +1,41 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: jenkins
+  namespace: jenkins-ns
+  annotations:
+    # No ingress class: GKE's built-in GCE controller claims it. This cluster
+    # has an "nginx" IngressClass object left over but no nginx controller
+    # running, so asking for nginx leaves the Ingress unprogrammed forever
+    # (no ADDRESS, no DNS, no certificate).
+    #
+    # Annotations below mirror the working ingresses on this cluster
+    # (monitoring/grafana8-ingress, centaur/centaur-console).
+    kubernetes.io/tls-acme: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    cert-manager.io/common-name: jenkins.example.com
+
+    # Issue a self-signed cert immediately so the GCE LB can be programmed.
+    # Without it the LB will not come up, and HTTP-01 can never be reached.
+    cert-manager.io/issue-temporary-certificate: "true"
+
+    # Solve HTTP-01 by editing this Ingress rather than creating a separate
+    # solver Ingress. On GCE a solver Ingress would provision its own load
+    # balancer, which is slow and usually never validates.
+    acme.cert-manager.io/http01-edit-in-place: "true"
+spec:
+  rules:
+    - host: jenkins.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: jenkins
+                port:
+                  name: http
+  tls:
+    - secretName: jenkins-tls-certificate
+      hosts:
+        - jenkins.example.com

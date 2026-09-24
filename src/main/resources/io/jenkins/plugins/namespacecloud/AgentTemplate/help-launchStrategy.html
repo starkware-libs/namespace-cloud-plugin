@@ -1,0 +1,10 @@
+<div>
+  How the provisioned instance connects back to Jenkins.
+  <ul>
+    <li><b>Inbound</b> &mdash; the agent dials out to the controller over
+        WebSocket. No inbound firewall rules. Preferred.</li>
+    <li><b>SSH</b> &mdash; the controller dials in. Needs the extra
+        <code>instance:ssh</code> and <code>ingress:access</code> grants and an
+        SSH keypair.</li>
+  </ul>
+</div>

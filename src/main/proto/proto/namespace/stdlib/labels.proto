@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package namespace.stdlib;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/stdlib";
+
+// Labels are key/value pairs attached to entities such as tenants.
+message Label {
+    // A name is an string up to 63 bytes that matches the regular expression `^[a-z]([a-z0-9-.]*[a-z0-9])?$`.
+    string name = 1;
+
+    // Label values are arbitrary values up to 255 bytes.
+    string value = 2;
+}
+
+message LabelFilterEntry {
+    string        name  = 1;
+    string        value = 2;
+    LabelFilterOp op    = 3;
+
+    enum LabelFilterOp {
+        UNKNOWN   = 0;
+        EQUAL     = 1;
+        NOT_EQUAL = 2;
+        EXIST     = 3;
+    }
+}

@@ -1,0 +1,20 @@
+# GCE load balancer tuning. Without this the deployment appears to work and
+# then fails in two specific ways.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: jenkins
+  namespace: jenkins-ns
+spec:
+  # The inbound agent holds a long-lived WebSocket. GCE's default backend
+  # timeout is 30s, which kills it and leaves the agent reconnecting forever.
+  # This is the GCE equivalent of nginx's proxy-read-timeout.
+  timeoutSec: 3600
+
+  # The default health check probes "/", which a secured Jenkins answers with
+  # 403. The backend would be marked UNHEALTHY and the LB would serve 502s.
+  # /login returns 200 to anonymous requests.
+  healthCheck:
+    type: HTTP
+    requestPath: /login
+    port: 8080

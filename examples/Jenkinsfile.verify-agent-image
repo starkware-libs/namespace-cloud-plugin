@@ -1,0 +1,230 @@
+// Verifies that a Namespace agent image contains, and can actually run, the
+// toolchain our CI depends on.
+//
+// Written with no backslash escapes and no line-continuations: Groovy processes
+// escapes inside triple-quoted strings, so a stray backslash can end a string
+// early and produce a confusing compile error. Literal tabs are avoided too.
+pipeline {
+    agent { label 'linux-2x4' }
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        stage('Environment') {
+            steps {
+                sh '''
+                    echo "jenkins node : ${NODE_NAME}"
+                    echo "hostname     : $(hostname)"
+                    echo "workspace    : ${WORKSPACE}"
+                    echo "user         : $(id -un) uid=$(id -u)"
+                    echo "vCPU         : $(nproc)"
+                    echo "memory       : $(free -g | awk '/^Mem:/ {print $2}') GB"
+                    echo "disk free    : $(df -h . | awk 'NR==2 {print $4}')"
+                    echo "arch         : $(uname -m)"
+                    echo "kernel       : $(uname -r)"
+                    if [ -r /etc/os-release ]; then
+                        . /etc/os-release
+                        echo "os           : ${PRETTY_NAME}"
+                    fi
+                    echo "java         : $(java -version 2>&1 | head -1)"
+                '''
+            }
+        }
+
+        stage('Running in the agent container') {
+            steps {
+                sh '''
+                    # The Namespace instance is a BusyBox VM with none of our
+                    # tooling; the image runs as a container inside it. This
+                    # launcher only exists in the container, so it distinguishes
+                    # the two. Every other check depends on being in the right
+                    # place, which is why this runs first.
+                    if [ -x /usr/local/bin/jenkins-agent ]; then
+                        echo "OK   : jenkins-agent launcher found, this is the agent container"
+                    else
+                        echo "FAIL : no jenkins-agent launcher"
+                        echo "       The image is not based on jenkins/inbound-agent."
+                        exit 1
+                    fi
+                '''
+            }
+        }
+
+        stage('Required tools present') {
+            steps {
+                sh '''
+                    fails=0
+                    rm -f missing.txt
+
+                    printf "%-12s %-9s %s" "TOOL" "STATUS" "VERSION"; echo ""
+                    printf "%-12s %-9s %s" "------------" "---------" "-------"; echo ""
+
+                    REQUIRED="git jq make gcc g++ curl python3 pip3 unzip zip gpg docker kubectl helm"
+
+                    for name in ${REQUIRED}; do
+                        if command -v "${name}" >/dev/null 2>&1; then
+                            case "${name}" in
+                                kubectl) raw=$(kubectl version --client=true 2>&1) ;;
+                                helm)    raw=$(helm version --short 2>&1) ;;
+                                zip)     raw=$(zip -L 2>&1) ;;
+                                unzip)   raw=$(unzip -v 2>&1) ;;
+                                *)       raw=$("${name}" --version 2>&1) ;;
+                            esac
+                            ver=$(echo "${raw}" | head -1 | cut -c1-56)
+                            printf "%-12s %-9s %s" "${name}" "OK" "${ver}"; echo ""
+                        else
+                            printf "%-12s %-9s %s" "${name}" "MISSING" "-"; echo ""
+                            echo "${name}" >> missing.txt
+                            fails=$((fails + 1))
+                        fi
+                    done
+
+                    echo ""
+                    if [ "${fails}" -gt 0 ]; then
+                        echo "${fails} required tool(s) missing:"
+                        sed 's/^/  - /' missing.txt
+                        echo ""
+                        echo "Add them to examples/agent-image/Dockerfile, rebuild and bump the tag:"
+                        echo "  nsc build . -n jenkins-agent:NEXT --push"
+                        exit 1
+                    fi
+                    echo "All required tools present."
+                '''
+            }
+        }
+
+        stage('Optional tools') {
+            steps {
+                sh '''
+                    # Reported for visibility; never fails the build.
+                    OPTIONAL="nsc node npm yarn cargo rustc go bazel terraform aws gcloud"
+                    for name in ${OPTIONAL}; do
+                        if command -v "${name}" >/dev/null 2>&1; then
+                            ver=$("${name}" --version 2>&1 | head -1 | cut -c1-56)
+                            printf "  %-10s present  %s" "${name}" "${ver}"; echo ""
+                        else
+                            printf "  %-10s absent" "${name}"; echo ""
+                        fi
+                    done
+                '''
+            }
+        }
+
+        stage('Tools actually work') {
+            steps {
+                sh '''
+                    set -eu
+                    # Being on PATH proves nothing. Each check exercises the tool.
+                    rm -rf toolprobe
+                    mkdir toolprobe
+                    cd toolprobe
+
+                    echo '{"ok":true,"n":42}' | jq -e '.n == 42' >/dev/null
+                    echo "jq      : parses and evaluates JSON"
+
+                    git init -q repo
+                    cd repo
+                    git -c user.email=probe@example.com -c user.name=probe commit -q --allow-empty -m probe
+                    cd ..
+                    echo "git     : init and commit"
+
+                    # A Makefile recipe must start with a tab. Building it with
+                    # awk avoids putting a literal tab or an escape in this file.
+                    TAB=$(awk 'BEGIN{printf "%c", 9}')
+                    echo "all:" > probe.mk
+                    echo "${TAB}touch make-ran" >> probe.mk
+                    make -s -f probe.mk
+                    test -f make-ran
+                    echo "make    : runs a target"
+
+                    python3 -c "import json, ssl, urllib.request; json.dumps({'a': 1})"
+                    echo "python3 : stdlib including json, ssl and urllib"
+
+                    pip3 --version >/dev/null
+                    echo "pip3    : responds"
+
+                    echo 'int main(void){return 0;}' > probe.c
+                    gcc -O2 -o probe probe.c
+                    ./probe
+                    echo "gcc     : compiles, links and runs"
+
+                    echo 'int main(){return 0;}' > probe.cpp
+                    g++ -o probecpp probe.cpp
+                    ./probecpp
+                    echo "g++     : compiles C++"
+
+                    echo payload > f.txt
+                    zip -q a.zip f.txt
+                    rm -f f.txt
+                    unzip -qo a.zip
+                    test "$(cat f.txt)" = "payload"
+                    echo "zip     : round-trips through unzip"
+
+                    kubectl version --client=true >/dev/null 2>&1
+                    echo "kubectl : client responds"
+
+                    helm version --short >/dev/null 2>&1
+                    echo "helm    : responds"
+
+                    cd ..
+                    rm -rf toolprobe
+                '''
+            }
+        }
+
+        stage('Network egress') {
+            steps {
+                sh '''
+                    # Distinguishes a missing tool from a blocked network.
+                    for url in https://github.com https://registry.npmjs.org https://pypi.org; do
+                        code=$(curl -sS -o /dev/null -w '%{http_code}' -m 15 "${url}" 2>/dev/null || echo "000")
+                        printf "  %-30s HTTP %s" "${url}" "${code}"; echo ""
+                    done
+                '''
+            }
+        }
+
+        stage('Docker socket') {
+            steps {
+                sh '''
+                    # Meaningful only when the profile exposes the instance
+                    # Docker socket, so absence is reported rather than failed.
+                    if docker info >/dev/null 2>&1; then
+                        echo "docker daemon : reachable"
+                        docker version --format '  client {{.Client.Version}} server {{.Server.Version}}' 2>/dev/null || true
+                    else
+                        echo "docker daemon : not reachable, socket not exposed on this profile"
+                    fi
+                '''
+            }
+        }
+
+        stage('Workspace') {
+            steps {
+                sh '''
+                    set -eu
+                    echo "built on $(hostname) at $(date -u +%FT%TZ)" > proof.txt
+                    cat proof.txt
+                    rm -f proof.txt
+                    echo "workspace : writable"
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'PASS - the agent image satisfies every requirement.'
+        }
+        failure {
+            echo 'FAIL - see the first failing stage above.'
+        }
+        cleanup {
+            echo "Finished on ${env.NODE_NAME}"
+        }
+    }
+}

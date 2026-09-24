@@ -1,0 +1,9 @@
+<div>
+  Mount the instance's Docker socket into the agent container, so builds can run
+  <code>docker</code> commands against the daemon Namespace already runs in the
+  instance &mdash; no docker-in-docker required.
+  <p>
+    Builds then share one daemon with anything else in that instance. Since
+    instances are single-use per build, that is normally fine.
+  </p>
+</div>

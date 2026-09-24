@@ -1,0 +1,1866 @@
+syntax = "proto3";
+
+package namespace.cloud.compute.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/compute/v1beta";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "proto/namespace/stdlib/callback.proto";
+import "proto/namespace/stdlib/labels.proto";
+import "proto/namespace/stdlib/matchers.proto";
+import "proto/namespace/stdlib/timeseries.proto";
+import "proto/namespace/cloud/iam/v1beta/authz.proto";
+import "proto/namespace/cloud/network/v1beta/egress.proto";
+
+// ComputeService allows the creation, and management of compute instances.
+// Compute instances are micro-vm backed environments which boot very quickly
+// and are optimized to run containers.
+//
+// See https://namespace.so/docs/architecture/compute for an overview.
+//
+// ## Access
+//
+// ComputeService is segregated into isolated regions for fault tolerance.
+// Each of the regional API endpoints offers a view into the compute instances
+// running at that location. Reach out to Namespace team at support@namespace.so
+// for a list of available regions.
+//
+// ```
+// https://{region}.compute.namespaceapis.com:443
+// # E.g.:
+// https://eu.compute.namespaceapis.com:443
+// https://us.compute.namespaceapis.com:443
+// ```
+//
+// See [the overview](https://buf.build/namespace/cloud) for examples accessing
+// the API from the console.
+//
+// ## SDKs and Examples
+//
+// **Go SDK**: [namespacelabs.dev/integrations](https://github.com/namespacelabs/integrations) —
+// provides ready-to-use gRPC clients and authentication helpers.
+//
+// **TypeScript SDK**: [@namespacelabs/sdk](https://github.com/namespacelabs/typescript-sdk) —
+// provides typed clients, authentication, and token management for Node.js.
+//
+// **Examples** (Go, TypeScript, Python):
+// [createinstance](https://github.com/namespacelabs/examples/tree/master/go/createinstance),
+// [kubernetes-demo](https://github.com/namespacelabs/examples/tree/master/typescript/kubernetes-demo),
+// [containers-demo](https://github.com/namespacelabs/examples/tree/master/typescript/containers-demo),
+// [ingress](https://github.com/namespacelabs/examples/tree/master/go/ingress),
+// and [more](https://github.com/namespacelabs/examples).
+//
+// ## Authentication
+//
+// Calls to the ComputeService require a *tenant token* or a *workload token*
+// passed as a Bearer token as part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *workload token* identifies a running instance, and the workspace it is
+// running in. Each running instance has a workload token, which is
+// automatically made available to services running inside the instance.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+//
+// ## Guest services
+//
+// Managed guest services such as docker that are deployed and managed by
+// Namespace are reachable using the corresponding standard APIs, through the
+// public internet.
+//
+// Because these services typically don't support Namespace-based encapsulation,
+// a client-side proxy is used to transport the application-specific protocol
+// over the Namespace's public ingress, into the instance.
+//
+// To facilitate communication, the main underlying mechanism to transport the
+// application-specific protocol is WebSockets over HTTPS.
+//
+// ### Example: using the Docker API
+//
+// To call the Docker API remotely, first obtain the Docker public endpoint by
+// querying the set of running Services, using the DescribeInstance call.
+//
+// Iterate over `metadata.services` until finding an entry with `name=docker`.
+//
+// Establish an HTTPS connection to the contained `endpoint`, and upgrade it to
+// a WebSocket. To authenticate your request include an authentication token
+// (see Authentication) in the `x-nsc-ingress-auth` header.
+//
+// If connecting using a browser, where setting headers is not possible, you can
+// instead construct a URL using the base endpoint, and passing
+// `x-nsc-ingress-auth` as a query string argument.
+//
+// After the WebSocket is established, any frames received or sent of type
+// BinaryMessage carry application-specific payload.
+service ComputeService {
+    // Creates a new instance. Instances are micro-vm backed environments which
+    // are optimized to run containers. Each instance is deployed with
+    // `containerd`, and with optionally `dockerd` and Kubernetes.
+    //
+    // Instances can run one or more containers. Containers can be started using
+    // one of two mechanisms:
+    // - Namespace managed containers: containers are specified at creation time
+    //   via the `containers` field, or at runtime via the `StartContainers`
+    //   method. Managed containers have logs and metrics automatically
+    //   collected, and Namespace's infrastructure optimizes future startup time
+    //   of repeated use of the same containers. These containers are handled as
+    //   "critical" and their lifetime is tied to the VMs -- if they fail,
+    //   either due to early exit, OOM, etc, the instance also fails. Namespace
+    //   managed containers are always run on containerd directly, in the
+    //   `default` namespace.
+    //
+    // - User-managed containers: after an instance is created, you can use the
+    //   containerd or Docker APIs to create and manage containers yourself.
+    //   These containers are not marked required, so it's up to a user to take
+    //   action to terminate a VM on container failure.
+    //
+    //
+    // Instances that are running can be accessed via the region ingress.
+    // Endpoints per exposed service are returned as part of the instance
+    // creation. For example, proxies are exposed that allow direct access to
+    // `containerd`, `docker`, etc services which are usually only exposed over
+    // Unix sockets.
+    //
+    // The creation of an instance produces a set of metadata: InstanceMetadata
+    // is also available in ListInstances requests, but the remainder of
+    // metadata (e.g. extended metadata) is only available at creation time, or
+    // if DescribeInstance is called.
+    //
+    // Instance creation is non-blocking. After an instance is created call
+    // WaitInstance to observe the states instance creation goes through.
+    //
+    // ### Errors
+    // - If the workspace is out of resources, a `ResourceExhausted` status is
+    //   returned.
+    // - If the request refers to an invalid argument, e.g. a non-existing
+    //   region, an `InvalidArgument` status is returned.
+    rpc CreateInstance(CreateInstanceRequest) returns (DescribeInstanceResponse);
+
+    // Waits until an instance reaches the RUNNING state. Intermediate updates,
+    // such as state progressions, or service state changes, are sent as
+    // individual metadata updates.
+    //
+    // When the instance reaches the RUNNING state, the server terminates the
+    // stream.
+    //
+    // If the instance was already in the RUNNING state when WaitInstance is
+    // called, a single InstanceMetadata is returned and the stream is closed
+    // immediately.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If instance creation is unsuccessful, `Internal` error is returned.
+    //   Refer to the InstanceMetadata.status in the last response for detailed
+    //   status.
+    rpc WaitInstance(WaitInstanceRequest) returns (stream WaitInstanceResponse);
+
+    // Waits until an instance reaches the RUNNING state and returns the
+    // instance metadata.
+    //
+    // To receive intermediate state updates during instance creation process
+    // use the streaming version of this method — `WaitInstance`.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc WaitInstanceSync(WaitInstanceRequest) returns (WaitInstanceResponse);
+
+    // Extend the lifetime of an instance by the provided duration.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc ExtendInstance(ExtendInstanceRequest) returns (ExtendInstanceResponse);
+
+    // Adds the specified set of containers to a running instance.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc StartContainers(StartContainersRequest) returns (StartContainersResponse);
+
+    // Obtains the metadata (including extra metadata) of a previously created
+    // instance.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc DescribeInstance(DescribeInstanceRequest) returns (DescribeInstanceResponse);
+
+    // Destroys a previously created instance.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc DestroyInstance(DestroyInstanceRequest) returns (google.protobuf.Empty);
+
+    // Returns a list of all instances that match the specified filter.
+    rpc ListInstances(ListInstancesRequest) returns (ListInstancesResponse);
+
+    // Request that the specified instance be suspended, i.e. it's execution is
+    // stopped and RAM and disks snapshotted in a way that can be restored
+    // without the instance being restarted.
+    //
+    // See WakeInstance for the counterpart.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc SuspendInstance(SuspendInstanceRequest) returns (google.protobuf.Empty);
+
+    // Wakes up a suspended instance. Is a no-op if it is already running.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the instance is not suspended, an `FailedPrecondition` status is returned.
+    rpc WakeInstance(WakeInstanceRequest) returns (google.protobuf.Empty);
+
+    // Exposes a backend within the instance to the public internet. Typically
+    // used to serve public HTTPS-termination ingress that is backed by a
+    // container running inside the instance.
+    // See https://namespace.so/docs/architecture/networking/ingress for details.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc CreateIngress(CreateIngressRequest) returns (CreateIngressResponse);
+
+    // Returns the list of backends exposed from the instance to the public
+    // internet. This includes ingresses created using `CreateIngress` above
+    // or ingresses declaratively exposed using FEATURE_KUBERNETES_INGRESS_MANAGER
+    // feature.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the instance is already terminated, a `FailedPrecondition`
+    //   status is returned.
+    rpc ListIngresses(ListIngressesRequest) returns (ListIngressesResponse);
+
+    // Returns a configuration that can be used by `kubectl` to access
+    // Kubernetes inside the specified instance.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the instance is not running Kubernetes, an `FailedPrecondition`
+    //   status is returned.
+    rpc GetKubernetesConfig(GetKubernetesConfigRequest) returns (GetKubernetesConfigResponse);
+
+    // Returns metrics that represent resource usage by the specified instance.
+    // Metrics can also be queried from instances that are still running.
+    // See https://namespace.so/docs/architecture/compute/observability for details.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc GetInstanceMetrics(GetInstanceMetricsRequest) returns (GetInstanceMetricsResponse);
+
+    // Returns the network configuration used within the target workspace.
+    // See https://namespace.so/docs/architecture/networking for details.
+    rpc GetNetworkConfiguration(GetNetworkConfigurationRequest) returns (GetNetworkConfigurationResponse);
+
+    // Returns a configuration that can be used to access the instance with SSH.
+    // See https://namespace.so/docs/architecture/compute/ssh-remote-display for details.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    rpc GetSSHConfig(GetSSHConfigRequest) returns (GetSSHConfigResponse);
+
+    // Returns a configuration that can be used to access the instance's remote display using VNC.
+    // The caller's authentication token must also grant access to the instance ingress when connecting to the returned endpoint.
+    //
+    // ### Errors
+    // - If the instance does not exist, a `NotFound` status is returned.
+    // - If the instance does not expose a VNC service, a `FailedPrecondition` status is returned.
+    rpc GetVNCConfig(GetVNCConfigRequest) returns (GetVNCConfigResponse);
+
+    // Release the currently associated instance ID from a unique tag.
+    //
+    // Tags are only unique per region. Make sure to select the correct ComputeService endpoint.
+    // When calling this service from within an instance, `NSC_ENDPOINT` will point to the ComputeService endpoint for the current region.
+    // Our [SDK](https://github.com/namespacelabs/integrations?tab=readme-ov-file#namespace-integrations) handles this automatically.
+    //
+    // ### Errors
+    // - If the unique tag does not exist, a `NotFound` status is returned.
+    rpc ReleaseUniqueTag(ReleaseUniqueTagRequest) returns (ReleaseUniqueTagResponse);
+
+    // Triggers an internal process to optimize an image. This is not always
+    // needed and is used for internal purposes.
+    rpc OptimizeImage(OptimizeImageRequest) returns (stream OptimizeImageProgress);
+
+    // Returns a list of instance notification events. Each instance has at most one event
+    // in the response, representing its most recent state change. Events can
+    // be filtered by instance ID.
+    rpc ListInstanceNotifications(ListInstanceNotificationsRequest) returns (ListInstanceNotificationsResponse);
+}
+
+message CreateInstanceRequest {
+    // The shape of the instance to be created.
+    InstanceShape shape = 1;
+
+    // A list of features that should be enabled in this instance.
+    // Deprecated: use feature_configuration below instead.
+    repeated Feature features = 3;
+
+    // A list of features that should be enabled in this instance.
+    FeatureConfiguration feature_configuration = 11;
+
+    // A human-facing description of the purpose of this instance. Used for
+    // debugging purposes.
+    string documented_purpose = 4;
+
+    // A set of labels that are attached to the new instance. Instances can be
+    // queried based on labels, see also ListInstancesRequest.
+    repeated namespace.stdlib.Label labels = 5;
+
+    // Timestamp of when this instance should be released (in UTC). Requested
+    // deadlines can be modified by policy. For example, if a workspace is
+    // configured with a maximum deadline of 24h, and a instance is created with
+    // a requested deadline of 48h, the resulting instance will have a deadline
+    // of 24h.
+    //
+    // When a instance hits its deadline, processes within will receive a
+    // `SIGTERM` and have a maximum time to shutdown gracefully before the
+    // instance is destroyed.
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp deadline = 6;
+
+    // Deprecated and ignored; it used to allow creation queueing.
+    bool interactive = 7;
+
+    // Requests that the new instance be created in the specified region.
+    //
+    // Typically a region is not set. In that case, the Namespace platform makes
+    // a placement a decision on behalf of users based on the type of workload,
+    // tenant policies and available global capacity.
+    string region = 8;
+    // Ordered placement selectors.
+    //
+    // Each entry must be one of:
+    // - `cell:<cell-name>` (for example `cell:iad2-a`)
+    // - `site:<site-name>` (for example `site:iad2`)
+    // - `continent:<continent-name>` (for example `continent:us`)
+    // - `any`
+    repeated string placement = 19;
+
+    // Start the specified containers as part of instance creation. Containers
+    // are deployed to `containerd` directly. See ContainerRequest for more
+    // details. Only supported on Linux platform.
+    repeated ContainerRequest containers = 9;
+
+    // Ingresses backed by ports exposed directly by the instance. Unlike
+    // container export ports, these can target any supported platform.
+    repeated Ingress ingresses = 20;
+
+    // Domain used to construct ingress hostnames for the instance. The
+    // workspace must be configured to allow the requested domain.
+    string ingress_base_domain = 21;
+
+    // Start the specified applications on the instance without using
+    // containerization. See ApplicationRequest for details.
+    repeated ApplicationRequest applications = 14;
+
+    // A set of experimental features that should be attached to this instance.
+    // Experimental features may be removed or modified at any time by the
+    // Namespace team.
+    ExperimentalFeatures experimental = 10;
+
+    // Attach storage to the instance, notably, cache volumes.
+    // See https://namespace.so/docs/architecture/storage/cache-volumes for details.
+    repeated VolumeRequest volumes = 12;
+
+    // Enable container caching. Container caching is only available on Linux.
+    ContainerCache container_cache = 13;
+
+    // We'll HTTP POST on this URL whenever the instance changes state. The body
+    // of the post will be application/json with a serialized
+    // InstanceEventMetadata.
+    namespace.stdlib.HttpCallbackEndpoint http_event_callback = 15;
+
+    // Additional authenticated registries that can be targeted when pulling images.
+    // The map key is the registry address.
+    map<string, AdditionalRegistry> additional_registries = 16;
+
+    // The set of permissions to grant to the workload running in this instance.
+    // If not specified, inherits the tenant's default workload permissions.
+    // If the tenant token used to authenticate this request does not itself
+    // grant a requested permission, the request fails with `PermissionDenied`.
+    // See https://namespace.so/docs/security/permissions for available permissions.
+    repeated namespace.cloud.iam.v1beta.Permission workload_permissions = 17;
+
+    // Network policy to apply to the instance.
+    // See https://namespace.so/docs/architecture/networking/security for details.
+    NetworkPolicy network_policy = 18;
+
+    message NetworkPolicy {
+        // Inline egress policy configuration, defining behavior via mode and rules.
+        namespace.cloud.network.v1beta.EgressPolicySpec egress = 1;
+
+        // Tag of a pre-configured workspace egress policy to apply. Mutually
+        // exclusive with 'egress'.
+        string egress_policy_tag = 2;
+    }
+
+    message ExperimentalFeatures {
+        // A list of private features used to enable experimental behavior in a
+        // instance.
+        //
+        // For more details chat with the Namespace team.
+        repeated string private_feature = 1;
+
+        // Attach the specified disks as additional read-only volumes to the new
+        // instance. Disks are specified as container image sources, which are
+        // converted into a flattened filesystem that is then made available as
+        // block storage that is attached to the VM that backs the instance.
+        repeated Disk disks = 2;
+
+        // Configure `containerd` with an additional set of shims.
+        repeated ContainerdShim containerd_shims = 3;
+
+        // Export a set of ports using a TLS frontend. Because TLS allows a
+        // proxy to perform SNI-based routing, different services can be backed
+        // by a single TLS ingress.
+        repeated TlsBackedPort tls_backed_ports = 4;
+
+        // Request that the following set of container images be prewarmed in
+        // `containerd`. This is strictly best-effort.
+        repeated PrewarmContainerImage prewarm_container_images = 5;
+
+        reserved 6;
+        reserved "return_workload_identity_token";
+
+        // Register a wildcard domain for ingress directed at this new instance.
+        bool enable_wildcard_domain = 7;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        // A union of these set of volumes and the volumes defined in
+        // CreateInstanceRequest are used.
+        repeated VolumeRequest volumes = 8;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        repeated DirectoryRequest ensure_directory = 9;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        string unique_tag = 10;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        map<string, string> exported_unix_sockets = 11;
+
+        // Enable container caching.
+        ContainerCache container_cache = 12;
+
+        // Hooks to trigger before any programs (containers or applications) are started.
+        repeated Hook pre_start_hook = 17;
+
+        // Hooks to trigger before the instance shuts down.
+        repeated Hook pre_shutdown_hook = 13;
+
+        // Public keys to enroll for SSH access to the created instance.
+        repeated string authorized_ssh_keys = 14;
+
+        // Base image ID to use for a macOS instance.
+        string macos_base_image_id = 16;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        map<string, string> internal = 15;
+
+        // Sets the instance and any containers up with required configuration to use Nested Virtualization (e.g. KVM)
+        // Only supported on Linux
+        bool nested_virtualization = 19;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        PrometheusMetricsSink prometheus_metrics_sink = 20;
+
+        reserved 18;  // persistent_volumes
+
+        message Disk {
+            string name      = 1;
+            string image_ref = 2;
+        }
+
+        message ContainerdShim {
+            string          name         = 1;
+            string          runtime_type = 2;
+            repeated string add_to_path  = 3;
+            string          binary_name  = 4;
+            string          root         = 5;
+        }
+
+        message TlsBackedPort {
+            string name          = 1;
+            int32  port          = 2;
+            bool   terminate_tls = 3;  // If this is false, TLS is used in passthrough mode.
+            // Only applies when terminate_tls is true. Defaults to mTLS.
+            IngressClientAuthentication client_authentication = 4;
+        }
+
+        message PrewarmContainerImage {
+            // The target containerd that the image should be warmed up to. Use
+            // "default" for containers started by Namespace; "moby" for Docker
+            // containers and "k8s" for Kubernetes.
+            string containerd_namespace = 1;
+            // A fully qualified image reference, including digest. Only fully
+            // specified images will be part of optimized profiles. Non-fully
+            // qualified references are silently dropped.
+            string image_ref = 2;
+        }
+
+        message DirectoryRequest {
+            string abs_path = 1;
+            uint32 mode     = 2;
+        }
+
+        // Deprecated: use the top-most message.
+        message ContainerCache {
+            // Which cache volume to use to store container images.
+            string cache_volume_tag = 1;
+            // If this is a separate volume, the size of the volume is required. Must not be set if this is an existing tag.
+            int64 size_mb = 2;
+            // If this is an existing volume (i.e. for which a volume request exists), the relative path within that volume to use. Optional.
+            string relative_path = 3;
+        }
+
+        message Hook {
+            // If set, execute this command during the hook.
+            Command command = 1;
+
+            message Command {
+                string command = 1;
+
+                // A set of arguments to pass to the command invocation.
+                //
+                // Example: `["--foobar"]`
+                repeated string args = 2;
+
+                // A set of environment values to be used as the command's environment.
+                //
+                // These set of environment variables are added in addition to a
+                // system-specified set of environment variables.
+                //
+                // Example: `{"FOOBAR": "1"}`
+                map<string, string> environment = 3;
+            }
+        }
+
+        message PrometheusMetricsSink {
+            string url                            = 1;
+            string bearer_token_secret_ref        = 2;
+            string basic_auth_username            = 3;
+            string basic_auth_password_secret_ref = 4;
+        }
+    }
+
+    enum Feature {
+        FEATURE_UNKNOWN = 0;
+        // Enable Kubernetes in this instance.
+        FEATURE_KUBERNETES = 1;
+        // Automatically expose ingresses annotated with "kubernetes.namespace.so/expose: true"
+        // as authenticated HTTP endpoints.
+        FEATURE_KUBERNETES_INGRESS_MANAGER = 2;
+    }
+
+    message FeatureConfiguration {
+        // If set, also runs a single-node Kubernetes in this instance. Must be
+        // set to a specific Kubernetes major+minor version, e.g. "1.26" or "1.28".
+        string enable_kubernetes_version = 1;
+
+        // Automatically expose ingresses annotated with "kubernetes.namespace.so/expose: true"
+        // as authenticated HTTP endpoints.
+        bool enable_kubernetes_ingress_manager = 2;
+
+        // Overrides the kubelet --max-pods value. Must be <= 250.
+        int32 kubernetes_max_pods = 3;
+    }
+}
+
+message AdditionalRegistry {
+    Authenticator authentication = 1;
+
+    message Authenticator {
+        // A pair of username and password to use when pulling images.
+        Basic basic = 1;
+
+        // Instruct Namespace to generate an OIDC token to access the registry.
+        // The generated access token will be signed by the issuer `https://federation.namespaceapis.com`.
+        OpenIDFederation openid = 2;
+
+        // Namespace will federate with AWS to obtain an [ECR authorization token](https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_GetAuthorizationToken.html).
+        // Make sure to grant the required `ecr:*` permissions to the federated IAM role.
+        AssumeRoleFromAwsFederation ecr_token_from_aws_federation = 3;
+
+        // Namespace will federate with Google Cloud Workload Identity Federation to
+        // obtain a short-lived access token usable with Google Artifact Registry (or
+        // Container Registry). Namespace performs the STS token-exchange and, if
+        // requested, service account impersonation server-side.
+        GcpWorkloadIdentityFederation gcp_workload_identity_federation = 4;
+
+        message Basic {
+            string username            = 1;
+            string password_secret_ref = 2;
+        }
+
+        message OpenIDFederation {
+            // Required.
+            string username = 1;
+
+            // Optional. If not set, the audience will be the address of the target registry.
+            string audience = 2;
+        }
+
+        message AssumeRoleFromAwsFederation {
+            // Amazon Resource Name of the IAM role to assume.
+            // The IAM role must be [set up for federated access from Namespace](https://namespace.so/docs/federation/aws#accessing-aws-resources-from-namespace) including an appropriate trust policy.
+            string role_arn = 1;
+        }
+
+        message GcpWorkloadIdentityFederation {
+            // Required. Full resource name of the GCP Workload Identity Provider, used
+            // as the Security Token Service (STS) token-exchange audience. E.g.
+            // "//iam.googleapis.com/projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/POOL_ID/providers/PROVIDER_ID".
+            // The provider must be configured to trust the issuer
+            // `https://federation.namespaceapis.com`.
+            string audience = 1;
+
+            // Optional. Email of the service account to impersonate after federation
+            // (e.g. "name@project.iam.gserviceaccount.com"). If set, the federated
+            // identity must hold `roles/iam.workloadIdentityUser` on this service
+            // account, and the service account must hold `roles/artifactregistry.reader`.
+            // If empty, the federated identity accesses the registry directly and must
+            // itself hold `roles/artifactregistry.reader`.
+            string service_account_email = 2;
+
+            // Optional. The username to use for the registry authentication. Defaults
+            // to "oauth2accesstoken".
+            string username = 3;
+        }
+    }
+}
+
+// DescribeInstanceResponse is returned as a result to CreateInstance or
+// DescribeInstance. It includes both standard metadata (that focuses on
+// instance status), and extended metadata (credentials, endpoints, etc).
+message DescribeInstanceResponse {
+    // A fully qualified URL that points to the instance summary in the
+    // dashboard. E.g.
+    // `https://cloud.namespace.so/01gr490qvbntkjn9jwypnd4g04/instance/ui3e3e3g7cfrg`.
+    string instance_url = 1;
+
+    // InstanceMetadata include both creation time specified fields such as
+    // labels, and status-like properties like the destroyed timestamp if the
+    // instance is no longer running.
+    InstanceMetadata metadata = 2;
+
+    // Service-specific metadata which may include credentials. E.g. SSH or
+    // Kubernetes endpoint information.
+    InstanceExtendedMetadata extended_metadata = 3;
+
+    // Endpoint information of the private Container Registry that is usable
+    // with this instance. Instances are pre-configured to access workspace-owned
+    // images in this registry.
+    ImageRegistry registry = 4;
+
+    // If the instance creation specified a set of containers, specifies the
+    // corresponding allocated containers.
+    repeated AllocatedContainer containers = 5;
+
+    // A set of experimental features attached to this instance. Experimental
+    // features may be removed or modified at any time by the Namespace team.
+    ExperimentalFeatures experimental = 6;
+
+    // A list of metadata that is attached to the instance.
+    repeated Attachment attachments = 7;
+
+    // The instance's container cache configuration, if one exists.
+    ContainerCache container_cache = 8;
+
+    // A list of reasons why an instance terminated.
+    // Usually, this only contains one entry.
+    // If there were multiple concurrent causes that triggered a shutdown, each would be noted here.
+    repeated ShutdownReason shutdown_reasons = 9;
+
+    // The set of permissions granted to the workload running in this instance.
+    repeated namespace.cloud.iam.v1beta.Permission workload_permissions = 10;
+
+    message ExperimentalFeatures {
+        reserved 1;
+        reserved "workload_identity_token";
+
+        // If `enable_wildcard_certificate` is set, the certificate that is
+        // being generated for this instance. E.g. `*.{instanceid}.foobar.com`.
+        string instance_wildcard_domain = 2;
+    }
+
+    message ShutdownReason {
+        // If the shutdown reason is a container termination, this code will contain the exit code of the container.
+        int32  error_code    = 1;
+        string error_message = 2;
+
+        string container_nsc_id        = 3;
+        string container_name          = 4;
+        string container_failed_reason = 5;
+    }
+}
+
+message ContainerCache {
+    // Which cache volume to use to store container images.
+    string cache_volume_tag = 1;
+    // If this is a separate volume, the size of the volume is required. Must not be set if this is an existing tag.
+    int64 size_mb = 2;
+    // If this is an existing volume (i.e. for which a volume request exists), the relative path within that volume to use. Optional.
+    string relative_path = 3;
+}
+
+// A typed blob that can be attached to an instance.
+message Attachment {
+    string type_url = 1;
+    bytes  content  = 2;
+}
+
+message StartContainersRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+
+    // The set of additional containers that should be started in the target
+    // instance.
+    repeated ContainerRequest containers = 2;
+}
+
+message ContainerRequest {
+    // A name of the container being created. Must be unique within the instance.
+    // Must match the regular expression `[a-z0-9]([a-z0-9-]*[a-z0-9])?`.
+    string name = 1;
+
+    // An image reference to the container image used to back this container.
+    //
+    // Ideally image references that are specified are fully resolved and
+    // "pinned", i.e. their digest is also specified.
+    //
+    // If no resolved image is provided, it is resolved during creation time,
+    // which may add latency to the creation request.
+    //
+    // Example:
+    // `ubuntu:22.04@sha256:dfd64a3b4296d8c9b62aa3309984f8620b98d87e47492599ee20739e8eb54fbf`
+    string image_ref = 2;
+
+    // The ID of a Namespace-managed image. The ID is resolved to a pinned image
+    // reference during instance creation. Mutually exclusive with `image_ref`.
+    //
+    // Supported values:
+    // - `builtin:base`
+    // - `builtin:agents`
+    string known_image_id = 17;
+
+    // A set of arguments to pass to the container's entrypoint. If `entrypoint`
+    // is not set, these are passed to the image's default ENTRYPOINT.
+    //
+    // Example: `["--foobar"]`
+    repeated string args = 3;
+
+    // If specified, overrides the image's entrypoint.
+    repeated string entrypoint = 15;
+
+    // A set of environment values to be used as the container's environment.
+    //
+    // These set of environment variables are added in addition to a
+    // system-specified set of environment variables.
+    //
+    // Example: `{"FOOBAR": "1"}`
+    //
+    // This API will always be supported, but you may want to consider
+    // `env_vars` instead as a more complete API.
+    map<string, string> environment = 4;
+
+    // A set of environment values to be used as the container's environment.
+    //
+    // These set of environment variables are added in addition to a
+    // system-specified set of environment variables.
+    //
+    // Example: `{"FOOBAR": "1"}`
+    //
+    // Can also refer to different source values, e.g. secrets.
+    // By default, no secrets are injected.
+    repeated EnvironmentVariable env_vars = 14;
+
+    // If set, makes docker available to the container. Any containers that are
+    // started by the container via the Docker API are then run as containers
+    // alongside this container, not as children.
+    //
+    // Bind mounts work across containers by using container-aware bind mount
+    // resolution.
+    //
+    // Example: `/var/run/docker.sock`
+    string docker_sock_path = 5;
+
+    // If set, injects Namespace metadata and credentials into the container at
+    // the specified path. This includes the workload token and instance
+    // metadata, and sets the following environment variables:
+    // - `NSC_INSTANCE_ID`: the ID of the parent instance.
+    // - `NSC_ENDPOINT`: the regional Compute API endpoint.
+    // - `NSC_TOKEN_FILE`: path to the injected token file.
+    //
+    // Can be used to allow the container to call Namespace APIs as the
+    // instance.
+    //
+    // Example: `/var/run/nsc`
+    string nsc_state_path = 6;
+
+    // If set, exposes guest-managed nsc binaries at the specified path.
+    string nsc_bins_path = 18;
+
+    // If set, mounts available secrets at the specified path.
+    string secrets_path = 19;
+
+    // A set of container ports to make available through the public ingress.
+    repeated ContainerPort export_ports = 7;
+
+    // By default containers run in a bridge network, with NAT. This allows
+    // containers to listen on arbitrary ports without requiring coordination.
+    //
+    // The container can be run in the instance networking by specifying `HOST`.
+    Network network = 9;
+
+    // A list of experimental features to enable in this container.
+    ExperimentalFeatures experimental = 10;
+
+    // Run the container with all capabilities.
+    bool privileged = 11;
+
+    // A set of volumes to be attached to this container.
+    repeated VolumeRequest volumes = 12;
+
+    // When a container terminates, the instance where it runs in will also
+    // terminate. If the workload type is set to `service`, the instance will always be
+    // marked as failed, regardless of the exit code of the container.
+    WorkloadType workload_type = 13;
+
+    // A set of volumes that get mounted into the container at the specified paths.
+    // These volumes are always read-only.
+    repeated SidecarVolume sidecar_volumes = 16;
+
+    enum Network {
+        NETWORK_UNKNOWN = 0;
+        // Default
+        BRIDGE = 1;
+        HOST   = 2;
+    }
+
+    message ExperimentalFeatures {
+        // Array of log file patterns to retain. Globbing is supported.
+        repeated string include_logs = 1;
+
+        // A series of bind mounts to apply to the container. Can be used for
+        // cross-container communication.
+        repeated HostMount host_mount = 2;
+
+        // Run the container with all capabilities.
+        // Deprecated: use privileged under the ContainerRequest.
+        bool privileged = 3;
+
+        // Reach out to the Namespace team to learn more about this capability.
+        map<string, string> exported_unix_sockets = 4;
+
+        // Additional credentials that can be used to pull the image used to back this container.
+        //
+        // Prefer using `CreateInstanceRequest.additional_registries` to provide persistent pull credentials for the instance.
+        ImagePullCredentials image_pull_credentials = 5;
+
+        // Store the contents of the run (and only the contents of the ephemeral
+        // disk) as a new container image. Can only push to `nscr.io`.
+        PushEphemeralDiskAsImage push_ephemeral_disk_as_image = 6;
+
+        // Set of capabilities to add to the container, e.g. NET_CAP.
+        repeated string cap_add = 7;
+
+        // Set of capabilities to drop.
+        repeated string cap_drop = 8;
+
+        // Set of devices to expose to the container.
+        repeated string devices = 9;
+
+        // A set of volumes that get mounted into arbitrary paths within the
+        // container namespace. Always read only.
+        repeated SidecarVolume sidecar_volumes = 10;
+
+        // Chat with support@namespace.so about this setting.
+        bool incremental_loading = 11;
+
+        // Chat with support@namespace.so about this setting.
+        bool sandbox_like = 12;
+
+        // Add a process supervisor.
+        bool use_init = 13;
+
+        message HostMount {
+            string host_path      = 1;
+            string container_path = 2;
+            bool   readonly       = 3;
+        }
+
+        message ImagePullCredentials {
+            // Namespace will federate with AWS to obtain an [ECR authorization token](https://docs.aws.amazon.com/AmazonECR/latest/APIReference/API_GetAuthorizationToken.html).
+            // Make sure to grant the required `ecr:*` permissions to the federated IAM role.
+            AWSCredentials aws_ecr = 1;
+        }
+
+        message PushEphemeralDiskAsImage {
+            // E.g. nscr.io/foobar/myimage
+            string target_image_ref = 1;
+        }
+
+        message SidecarVolume {
+            // Optional.
+            string name           = 1;
+            string image_ref      = 2;
+            string container_path = 3;
+        }
+    }
+
+    enum WorkloadType {
+        // Defaults to JOB.
+        WORKLOAD_TYPE_UNKNOWN = 0;
+        // Default; when a container terminates, the instance also terminates.
+        JOB = 1;
+        // The container is marked as critical, and if the container fails, the instance will fail with a fatal error.
+        SERVICE = 2;
+    }
+
+    // A volume that gets mounted into arbitrary paths within
+    // the container namespace. Always read only.
+    message SidecarVolume {
+        // Optional name for the sidecar volume.
+        string name = 1;
+        // Image reference for the container image that backs this sidecar volume.
+        string image_ref = 2;
+        // Path within the container where this volume will be mounted.
+        string container_path = 3;
+    }
+}
+
+message EnvironmentVariable {
+    // Required: Name under which the environment variable will be available, e.g. "FOOBAR_VAR_NAME".
+    string name = 1;
+
+    // Optional: If set, use this static value for the environment variable.
+    string value = 2;
+
+    // Optional: If set, overrides value. Namespace will dynamically resolve the secret on instance creation.
+    // By default, no secrets are resolved unless requested explicitly.
+    string from_secret_id = 3;
+}
+
+message AWSCredentials {
+    // Amazon Resource Name of the IAM role to assume.
+    // The IAM role must be [set up for federated access from Namespace](https://namespace.so/docs/federation/aws#accessing-aws-resources-from-namespace) including an appropriate trust policy.
+    string assume_role_arn = 1;
+}
+
+message StartContainersResponse {
+    // The corresponding set of allocated containers. Containers are returned in
+    // the same order they are requested.
+    repeated AllocatedContainer containers = 1;
+}
+
+// Specifies an application to run on an instance without containerization.
+// The application binary is distributed as a container image (OCI) pushed to
+// the workspace's private registry (`nscr.io`). Only the image filesystem is
+// used; ENTRYPOINT/CMD from the image config are not respected.
+//
+// **Example** (macOS):
+// [macrun](https://github.com/namespacelabs/examples/tree/master/go/macrun).
+message ApplicationRequest {
+    // A name of the application being created. Must be unique.
+    string name = 1;
+
+    // Optional image with application distribution to be mounted on the instance.
+    // The image filesystem is extracted and made available to the `command`
+    // below. ENTRYPOINT/CMD specified in the image config are not respected.
+    //
+    // Example: `nscr.io/abc012abc012/foobar`
+    string image_ref = 2;
+
+    // Command to execute.
+    //
+    // May be:
+    //
+    // * Absolute (refers to a pre-installed binary in the base image).
+    //   Example: `/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild`.
+    //
+    // * Relative to the image specified above.
+    //   Example: `./postgres`.
+    //
+    // * Resolved from $PATH (using the default $PATH of the base image)
+    //   Example: `xcrun`.
+    string command = 14;
+
+    // A set of arguments to pass to the application.
+    //
+    // Example: `["--foobar"]`
+    repeated string args = 3;
+
+    // A set of environment values to be used as the container's environment.
+    //
+    // These set of environment variables are added in addition to a
+    // system-specified set of environment variables.
+    //
+    // Example: `{"FOOBAR": "1"}`
+    // This API will always be supported, but you may want to consider
+    // `env_vars` instead as a more complete API.
+    map<string, string> environment = 4;
+
+    // A set of environment values to be used as the container's environment.
+    //
+    // These set of environment variables are added in addition to a
+    // system-specified set of environment variables.
+    //
+    // Example: `{"FOOBAR": "1"}`
+    //
+    // Can also refer to different source values, e.g. secrets.
+    repeated EnvironmentVariable env_vars = 15;
+
+    // When a container terminates, the instance where it runs in will also
+    // terminate. If the workload type is set to `service`, the instance will always be
+    // marked as failed, regardless of the exit code of the container.
+    WorkloadType workload_type = 13;
+
+    // A list of experimental features to enable in this container.
+    ExperimentalFeatures experimental = 10;
+
+    enum WorkloadType {
+        // Defaults to JOB.
+        WORKLOAD_TYPE_UNKNOWN = 0;
+        // Default; when the application terminates, the instance also terminates.
+        JOB = 1;
+    }
+
+    message ExperimentalFeatures {
+        // Array of log file patterns to retain. Globbing is supported.
+        repeated string include_logs = 1;
+    }
+}
+
+message DescribeInstanceRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+}
+
+message WaitInstanceRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+
+    // If set to true, we don't fail the request if the instance is destroyed while waiting.
+    bool destroyed_ok = 2;
+
+    // The ID of the container to wait for. This is the Namespace-allocated ID
+    // returned when a container is created.
+    string container_id = 3;
+
+    // The name of the container to wait for. This is the user-specified name
+    // provided in ContainerRequest.name during instance creation or StartContainers.
+    // If both container_id and container_name are set, container_name takes precedence.
+    string container_name = 4;
+}
+
+message WaitInstanceResponse {
+    // The up-to-date metadata of the specified instance.
+    InstanceMetadata metadata = 1;
+
+    // If a container is specified, its status.
+    string container_status = 2;
+}
+
+message ExtendInstanceRequest {
+    // The ID of the instance which should be extended.
+    string instance_id = 1;
+
+    // The duration this instance should be extended by.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration extend_by = 2;
+
+    // The minimum duration this instance should be running.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration ensure_minimum = 3;
+
+    // The new deadline (in UTC) at which the instance is destroyed.
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp new_deadline = 4;
+}
+
+message ExtendInstanceResponse {
+    // The new deadline at which the instance is destroyed.
+    google.protobuf.Timestamp new_deadline = 1;
+}
+
+message DestroyInstanceRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+
+    // The reason of destruction is persisted with the instance and can be
+    // retrieved later.
+    string reason = 2;
+}
+
+message ListInstancesRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return as part of this ListInstances
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+
+    // If not set, only returns instances in the PENDING, CREATING or RUNNING
+    // states.
+    //
+    // If set, also includes instances in the DESTROYED and ERROR states.
+    bool include_complete_runs = 3;
+
+    // Don't return instances that were created before the specified timestamp
+    // (in UTC).
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp not_older_than = 4;
+
+    // Only return instances that match the specified filter.
+    repeated namespace.stdlib.LabelFilterEntry label_filter = 5;
+}
+
+message ListInstancesResponse {
+    // The list of instances that match the filter.
+    repeated InstanceMetadata instances = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListInstances call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+// Configures client authentication for TLS-terminating TCP ingress.
+enum IngressClientAuthentication {
+    // TCP ingress defaults to requiring mTLS.
+    INGRESS_CLIENT_AUTHENTICATION_UNSPECIFIED = 0;
+    INGRESS_CLIENT_AUTHENTICATION_NONE        = 1;
+    INGRESS_CLIENT_AUTHENTICATION_MTLS        = 2;
+}
+
+// Describes a platform-managed, Internet-facing endpoint that routes traffic
+// to a service running inside an instance. Use CreateInstanceRequest.ingresses
+// for ports exposed directly by the instance, including native applications
+// on platforms such as macOS. Use ContainerRequest.export_ports for ports
+// owned by containers.
+//
+// Traffic and TLS boundaries:
+//
+// ```
+//   HTTP  [client] --HTTPS------> [Namespace ingress] --HTTP--> [backend]
+//   TCP   [client] --TLS/mTLS---> [Namespace ingress] --TCP---> [backend]
+//   TLS   [client] --TLS (routed by SNI, not terminated)------> [backend]
+// ```
+//
+// Each generated server name routes only to its declared instance and port;
+// no other instance ports are exposed by that ingress. In HTTP and TCP modes,
+// TLS terminates at Namespace and the ingress-to-backend protocol is cleartext
+// HTTP or TCP. TLS passthrough preserves end-to-end encryption: Namespace uses
+// the SNI hostname for routing but does not terminate TLS.
+//
+// HTTP requests require a valid Namespace bearer token with access to the
+// instance by default. HttpMatchRule can explicitly make matching requests
+// unauthenticated. TCP defaults to requiring a Namespace-issued mTLS client
+// certificate with access to the instance; NONE allows any TLS client to
+// connect. In TLS passthrough mode the backend is responsible for server and
+// client authentication.
+message Ingress {
+    // The name used to generate the Internet-facing server name.
+    string name = 1;
+
+    // The ingress behavior. Must be set.
+    Mode mode = 2;
+
+    // The port the instance is listening on.
+    int32 port = 3;
+
+    // HTTP routing and authentication rules. Only supported in HTTP mode.
+    repeated HttpMatchRule http_match_rule = 5;
+
+    // Routes all first-level subdomains of the instance wildcard domain to
+    // this ingress. Requires the instance wildcard domain to be enabled via
+    // experimental.enable_wildcard_domain. Only supported in HTTP mode and
+    // mutually exclusive with name.
+    bool wildcard = 6;
+
+    // Configures client authentication in TCP mode. MTLS is incompatible
+    // with TLS_PASSTHROUGH, where the backend terminates and authenticates TLS;
+    // NONE and UNSPECIFIED have equivalent behavior in passthrough mode. Must
+    // not be set in HTTP mode. TCP defaults to requiring mTLS.
+    IngressClientAuthentication client_authentication = 7;
+
+    enum Mode {
+        MODE_UNKNOWN    = 0;
+        // Terminate HTTPS and proxy cleartext HTTP to the instance.
+        HTTP            = 1;
+        // Terminate TLS and proxy the resulting TCP stream to the instance.
+        TCP             = 2;
+        // Route using SNI without terminating TLS.
+        TLS_PASSTHROUGH = 3;
+    }
+}
+
+message ContainerPort {
+    // The protocol the port being expose uses. Must be set.
+    //
+    // If the protocol is set to `HTTP` or `H2C` then the platform exposes the
+    // port using a HTTPS-terminating reverse proxy, which then communicates
+    // using cleartext HTTP/1.1 or HTTP/2 respectively with the container.
+    //
+    // If the protocol is `TCP` then the platform terminates TLS and proxies the
+    // resulting TCP stream. Client authentication is configured separately.
+    //
+    // If the protocol is `TLS_PASSTHROUGH`, the platform routes the encrypted
+    // stream using SNI and the container terminates TLS. TLS passthrough ports
+    // must be declared during instance creation.
+    //
+    // Example: `HTTP`
+    Proto proto = 1;
+
+    // The port the container is listening on. For example, if exposing a HTTP
+    // server, with `proto=HTTP`, the port the http server is listening on.
+    //
+    // Example: `3000`
+    int32 container_port = 2;
+
+    // If a name is provided, it is used to generate the Internet-facing server
+    // name used to access this port. If it's not provided, a random id is used.
+    string name = 4;
+
+    // A set of rules that configure the ingress when accessing this exported
+    // port. Only settable with `proto` is `HTTP`.
+    repeated HttpMatchRule http_match_rule = 3;
+
+    // Configures client authentication when `proto` is `TCP`. MTLS is
+    // incompatible with TLS_PASSTHROUGH, where NONE and UNSPECIFIED have
+    // equivalent behavior. Must not be set for HTTP or H2C. TCP defaults to
+    // requiring mTLS. TCP ports without client authentication must be declared
+    // during instance creation.
+    IngressClientAuthentication client_authentication = 5;
+
+    enum Proto {
+        PROTO_UNKNOWN   = 0;
+        HTTP            = 1;
+        TCP             = 2;
+        H2C             = 3;
+        TLS_PASSTHROUGH = 4;
+    }
+}
+
+// Configures which HTTP requests match an ingress rule, and whether
+// authentication is required.
+message HttpMatchRule {
+    // The HTTP method and path pattern to match.
+    HttpMatch match = 1;
+    // If true, requests matching this rule do not require authentication.
+    // By default, all requests require a valid Bearer token.
+    bool does_not_require_auth = 2;
+
+    message HttpMatch {
+        // If empty, matches any method.
+        repeated string method = 1;
+        // If empty, matches any path.
+        string path = 2;
+    }
+}
+
+message AllocatedContainer {
+    // A Namespace-allocated ID for this container.
+    string id = 1;
+    // The user specified container name.
+    string name = 2;
+
+    // The allocated exported ports, which include the allocated public ingress
+    // URLs.
+    repeated ExportedContainerPort exported_port = 3;
+
+    message ExportedContainerPort {
+        // The original specified protocol.
+        ContainerPort.Proto proto = 1;
+
+        // The original specified container port.
+        int32 container_port = 2;
+
+        // The original specified http rules.
+        repeated HttpMatchRule http_match_rule = 3;
+
+        // If required, the port exposed within the instance that translates to
+        // the container port above. This port is available in host networking
+        // only.
+        int32 exported_port = 4;
+
+        // The fully qualified domain that is configured in the public ingress
+        // to map back to this exposed port. Check `endpoint` for the hostname
+        // and port required to connect to the port.
+        string fqdn = 5;
+
+        // The endpoint to use to connect to the exported port. May include a
+        // port number as well, e.g. "foo-xyz.ord.namespaced.app:444".
+        string endpoint = 6;
+
+        // The effective client authentication mode.
+        IngressClientAuthentication client_authentication = 7;
+    }
+}
+
+message SuspendInstanceRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+}
+
+message WakeInstanceRequest {
+    // The ID of instance which this call targets.
+    string instance_id = 1;
+}
+
+// Extended metadata returned by CreateInstance and DescribeInstance. Includes
+// credentials and endpoints for accessing services running within the instance.
+message InstanceExtendedMetadata {
+    // SSH access metadata. Set when the instance supports SSH access.
+    SshMetadata ssh_metadata = 1;
+    // Kubernetes access metadata. Set when Kubernetes is enabled.
+    KubernetesInstanceMetadata kubernetes_metadata = 2;
+    // Allocated TCP and TLS passthrough ports.
+    repeated AllocatedTlsBackedPort tls_backed_port = 3;
+    // The regional API endpoint for the CommandService, used to execute
+    // commands in containers running on this instance.
+    string command_service_endpoint = 4;
+
+    message SshMetadata {
+        // The proxy endpoint to connect to for SSH access.
+        string ssh_proxy_endpoint = 1;
+        // A short-lived private key that can be used for SSH authentication.
+        // Access is restricted to this specific instance.
+        bytes ssh_private_key = 2;
+    }
+
+    message KubernetesInstanceMetadata {
+        // The Kubernetes API server endpoint address.
+        string endpoint_address = 1;
+        // PEM-encoded CA certificate for verifying the API server.
+        bytes certificate_authority_data = 2;
+        // PEM-encoded client certificate for authenticating to the API server.
+        bytes client_certificate_data = 3;
+        // PEM-encoded client key for authenticating to the API server.
+        bytes client_key_data = 4;
+        // The Kubernetes distribution running in the instance, e.g. "k3s".
+        string kubernetes_distribution = 5;
+    }
+
+    message AllocatedTlsBackedPort {
+        // The name specified in the Ingress request.
+        string name = 1;
+        // The allocated port number.
+        int32 port = 2;
+        // The SNI server name to use when connecting.
+        string server_name = 3;
+        // The effective ingress mode.
+        Ingress.Mode mode = 4;
+        // The effective client authentication mode.
+        IngressClientAuthentication client_authentication = 5;
+    }
+}
+
+message InstanceMetadata {
+    // The ID of the instance created.
+    string instance_id = 1;
+
+    // The timestamp of when the instance was created (in UTC).
+    google.protobuf.Timestamp created_at = 2;
+
+    // The timestamp of when the instance became ready/running (in UTC). Not set
+    // if the instance is one of PENDING or CREATING states.
+    google.protobuf.Timestamp ready_at = 13;
+
+    // The timestamp of when the instance was destroyed (in UTC). Not set if the
+    // instance is one of PENDING, CREATING or RUNNING states.
+    google.protobuf.Timestamp destroyed_at = 3;
+
+    // The computed deadline of the instance (in UTC). The instance will be
+    // destroyed when it hits its deadline.
+    google.protobuf.Timestamp deadline = 4;
+
+    // The user specified documented purpose.
+    string documented_purpose = 5;
+
+    // The user specified instance shape (cpu, memory, disk).
+    InstanceShape shape = 6;
+
+    // The status the instance is in.
+    Status status = 7;
+
+    // The region-specific base ingress domain used to back created ingresses.
+    //
+    // Example: `fra1.nscluster.cloud`.
+    string ingress_domain = 8;
+
+    // The user specified instance labels.
+    repeated namespace.stdlib.Label labels = 9;
+
+    // If the used authorization token has a `creator_id`, it is retained for
+    // debugging purposes.
+    string creator_id = 10;
+
+    // Maintain state of each of the exported system services in this instance.
+    // Examples of system services are `buildkit`, `kubernetes`, etc.
+    repeated Service services = 11;
+
+    // Information related to where the instance is running, or ran, including
+    // geography, and hw platform.
+    HWDeployment hw_deployment = 12;
+
+    enum Status {
+        STATUS_UNKNOWN = 0;
+        PENDING        = 1;
+        CREATING       = 2;
+        RUNNING        = 3;
+        DESTROYED      = 4;
+        DESTROYING     = 5;
+        SUSPENDING     = 6;
+        SUSPENDED      = 7;
+        ERROR          = 8;
+    }
+
+    // A service represents an internal service that is proxiable when an
+    // authenticated request is performed that proves that the caller has access
+    // to the instance.
+    //
+    // Access to services does not follow the gRPC service model, and goes over
+    // Namespace's programmable ingress directly, being a mix of either
+    // WebSocket- or HTTP-backed implementations.
+    message Service {
+        // The name of the service, e.g. "ssh", "docker" or "containerd".
+        string name = 1;
+
+        // It's current status, one of PENDING or READY.
+        //
+        // Note: It's not guaranteed that all services emit a PENDING state
+        // before becoming READY. The fact that they're starting can sometimes
+        // result in a lack of a ServiceState entry for that service.
+        Status status = 2;
+
+        // Identifies what application transport this endpoint implements.
+        EndpointKind endpoint_kind = 3;
+
+        // The application-specific endpoint. Typically a URL.
+        //
+        // Example: `wss://gate.fra1.nscluster.cloud/ui3e3e3g7cfrg/22`
+        string endpoint = 4;
+
+        enum Status {
+            STATUS_UNKNOWN = 0;
+            PENDING        = 1;
+            READY          = 2;
+        }
+
+        enum EndpointKind {
+            ENDPOINT_KIND_UNKNOWN = 0;
+            // The service is a regular HTTP 1.1/2 service with a TLS frontend.
+            //
+            // Authentication is provided using a Bearer token passed to the
+            // ingress on a `x-nsc-ingress-auth` header.
+            HTTPS = 1;
+            // The service proxies an API which maps back to an
+            // application-specific transport, with messages following an
+            // application-specific framing and transmitted over a secure
+            // WebSocket, using BinaryMessage.
+            //
+            // For example, when accessing the docker service, the websocket
+            // serves the same stream as one would get if connecting locally to
+            // the dockerd socket over Unix Sockets.
+            //
+            // Authentication is provided using a Bearer token passed to the
+            // ingress on either:
+            // - Via a `x-nsc-ingress-auth` header, with a `Bearer` prefix, e.g.
+            //   `Bearer nsct_abc...`.
+            // - By specifying a query argument `x-nsc-ingress-auth` where the
+            //   value is the token itself, e.g. `?x-nsc-ingress-auth=abc...`.
+            PROXY_OVER_SECURE_WEBSOCKET = 2;
+        }
+    }
+
+    message HWDeployment {
+        // In which continent was the instance deployed to, one of "us" or "eu".
+        string geo_continent = 1;
+        // What hardware platform was the instance deployed to, one of "a1", "a2", "mac-m2", "mac-m4" or "arm2".
+        string major_hwplatform = 2;
+    }
+}
+
+// Defines an instance shape: the combination of CPU, RAM and Disk that the
+// instance should use.
+//
+// The size of the ephemeral disk automatically scales with the selected CPU/RAM allocation.
+// See also https://namespace.so/docs/architecture/compute/machine-shapes#storage-allocation
+//
+// Usable values are constrained by policy, and are typically only settable in
+// values as powers of two.
+message InstanceShape {
+    // Number of virtual CPUs. Typically a power of two (e.g. 2, 4, 8, 16).
+    int32 virtual_cpu = 1;
+    // Memory in megabytes. Typically scales with CPU (e.g. 2048 per vCPU).
+    int32 memory_megabytes = 2;
+
+    // Architecture of the instance, e.g. "amd64" or "arm64".
+    string machine_arch = 3;
+
+    // Operating system of the instance, e.g. "linux" or "macos".
+    string os = 4;
+
+    // Provide additional constraints to instance selection. Available selectors:
+    // https://namespace.so/docs/architecture/compute/macos#available-selectors
+    repeated namespace.stdlib.Label selectors = 5;
+}
+
+// Endpoint information for the workspace's private container registry. Images
+// pushed to this registry are accessible from instances in the workspace.
+message ImageRegistry {
+    // The registry hostname, e.g. "nscr.io".
+    string endpoint_address = 1;
+    // The repository path within the registry that is scoped to this workspace.
+    string repository = 2;
+}
+
+message CreateIngressRequest {
+    string                  instance_id = 1;
+    repeated IngressRequest ingresses   = 2;
+}
+
+message IngressRequest {
+    // Ingresses configured through this message always terminate HTTPS and
+    // proxy cleartext HTTP to the backend.
+
+    // A name is an string that matches the regular expression `[a-z0-9]([a-z0-9-_]*[a-z0-9])?`.
+    string                 name                  = 1;
+    repeated HttpMatchRule http_match_rule       = 2;
+    ExportedPortBackend    exported_port_backend = 3;
+
+    // Routes all first-level sub domains of the instance wildcard domain to this ingress.
+    // Requires the hosting instance to have a wildcard domain (enabled via CreateInstanceRequest.experimental.enable_wildcard_domain).
+    bool wildcard = 4;
+}
+
+message CreateIngressResponse {
+    repeated AllocatedIngress allocated_ingresses = 1;
+}
+
+message ListIngressesRequest {
+    string instance_id = 1;
+}
+
+message ListIngressesResponse {
+    repeated AllocatedIngress allocated_ingresses = 1;
+}
+
+message AllocatedIngress {
+    string name        = 1;
+    string fqdn        = 2;
+    string description = 3;
+}
+
+message ExportedPortBackend {
+    int32 port = 1;
+    // Optional IP address of the backend. When unset, the ingress targets the
+    // instance itself (i.e. loopback). Set this to route ingress traffic to a
+    // non-loopback endpoint reachable from the instance, e.g. a Kubernetes
+    // Service's LoadBalancer IP.
+    string ip_address = 2;
+}
+
+message GetKubernetesConfigRequest {
+    string instance_id = 1;
+}
+
+message GetKubernetesConfigResponse {
+    string kubeconfig = 1;
+}
+
+message VolumeRequest {
+    // The absolute path where the volume is mounted inside the instance.
+    string mount_point = 1;
+    // A logical identifier for volume reuse across instances. For CACHE volumes,
+    // the platform attempts to mount a recently used volume with the same tag.
+    // For PERSISTENT volumes, the tag maps to a named durable volume.
+    string tag = 2;
+    // The requested size of the volume in megabytes.
+    int64 size_mb = 3;
+    // The persistency kind of the volume.
+    PersistencyKind persistency_kind = 4;
+
+    // If set, initializes the volume from the specified snapshot.
+    // Only supported for PERSISTENT volumes. If set on a CACHE volume, the request will fail.
+    // For persistent volumes, a new snapshot is created starting from the specified snapshot ID.
+    string from_snapshot_id = 5;
+
+    enum PersistencyKind {
+        PERSISTENCY_UNKNOWN = 0;
+        // The volume is durably persisted across instance lifetimes. Data is
+        // snapshotted on shutdown to ensure integrity.
+        PERSISTENT = 1;
+        // Best-effort persistence. The platform attempts to mount a recent
+        // volume with the same tag, but availability is not guaranteed.
+        CACHE = 2;
+    }
+}
+
+message GetInstanceMetricsRequest {
+    string instance_id = 1;
+
+    // If set, only metrics data on or after this timestamp will be returned.
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp start_timestamp = 2;
+
+    // If set, only metrics data up to this timestamp will be returned.
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp end_timestamp = 3;
+
+    enum MetricResource {
+        METRIC_UNSPECIFIED = 0;
+        // CPU usage.
+        // Provides the metrics:
+        // "cpu_max" (Doubles, 0..100):
+        //    For each time interval, CPU utilization of the most utilized CPU.
+        // "cpu_avg" (Doubles, 0 ..100):
+        //    For each time interval, average CPU utilization between all CPUs.
+        CPU = 1;
+        // CPU usage per CPU.
+        // For each CPU <n> (n = 0 .. number of CPUs - 1), provides the metrics:
+        // "cpu_<n>" (Doubles, 0..100):
+        //    CPU Utilization in the time interval for CPU <n>.
+        CPU_BREAKDOWN = 2;
+        // IO wait time percentage.
+        // Provides the metrics:
+        // "io_wait_max" (Doubles, 0..100):
+        //   For each time interval, max percentage of time spent waiting on IO
+        //   between the CPUs.
+        // "io_wait_avg" (Doubles, 0..100):
+        //   For each time interval, average percentage of time all CPUs spent
+        //   waiting on IO.
+        IO_WAIT = 3;
+        // Memory usage.
+        // Provides the metrics:
+        // "mem_available" (Integers, in bytes):
+        //   Available memory size, in bytes.
+        // "mem_used" (Integers, in bytes):
+        //   Used memory size, in bytes.
+        MEMORY = 4;
+        // Storage information.
+        // For each mounted volume <mountpoint>, provides the metrics:
+        // "storage_used_percent_<mountpoint>" (Doubles, 0..100):
+        //   Percentage of available storage capacity that is in use.
+        //   "/" is the root ephemeral storage mountpoint.
+        //   Other mountpoints are caches.
+        STORAGE = 5;
+    }
+
+    // Specifies which metrics should be returned.
+    repeated MetricResource metric_resource = 4;
+}
+
+message GetInstanceMetricsResponse {
+    // The requested metrics will be returned in one or more time series.
+    // The assignment of metrics to time series is implementation defined and
+    // can change over time, so the client should iterate all time_series when
+    // looking for a particular metric.
+    repeated namespace.stdlib.TimeSeries time_series = 1;
+}
+
+// Used as a error detail.
+message ResourceLimitsError {
+    string    description = 5;
+    LimitKind kind        = 4;
+    Resource  requested   = 1;
+    Resource  used        = 2;
+    Resource  limits      = 3;
+
+    message Resource {
+        int32 virtual_cpu      = 1;
+        int32 memory_megabytes = 2;
+        int32 instance_count   = 3;
+    }
+
+    enum LimitKind {
+        LIMIT_KIND_UNKNOWN   = 0;
+        CPU_MEMORY_LIMIT     = 1;
+        INSTANCE_COUNT_LIMIT = 2;
+    }
+}
+
+// Used as a error detail.
+message UsageLimitsError {
+    Usage used   = 1;
+    Usage limits = 2;
+
+    message Usage {
+        int64 compute_unit_minutes = 1;
+        int64 compute_wall_seconds = 2;
+    }
+}
+
+// Used as a error detail.
+message PlatformNotAllowedError {
+    string          requested_platform = 1;
+    repeated string allowed_platforms  = 2;
+}
+
+// Used as an error detail.
+message NoEligibleRegionError {
+    string requested_platform = 1;
+}
+
+message GetNetworkConfigurationRequest {}
+
+message GetNetworkConfigurationResponse {
+    Egress egress = 1;
+
+    message Egress {
+        // Possible source addresses used by instances running in this workspace
+        // (tenant).
+        repeated CIDR egress_cidrs = 1;
+    }
+
+    message CIDR {
+        Kind   kind = 1;
+        string cidr = 2;
+
+        // Network segment to attach a workload to in order to egress through
+        // this address. Only set for DEDICATED. Empty means the default pool.
+        string segment = 3;
+
+        enum Kind {
+            KIND_UNKNOWN              = 0;
+            NAMESPACE_MANAGED         = 1;
+            EXTERNAL_TRANSIT_PROVIDER = 2;
+            DEDICATED                 = 3;
+        }
+    }
+}
+
+message GetSSHConfigRequest {
+    // Required: which instance to provide and SSH configuration for.
+    string instance_id = 1;
+
+    // Optional: Specify a container name to connect to. The resulting connection endpoint will open a session in that container, if present.
+    string target_container = 2;
+}
+
+message GetSSHConfigResponse {
+    // If set, this private key can be used to establish an SSH session to the instance.
+    // Any private key returned here has limited access rights, restricted to a single instance.
+    bytes ssh_private_key = 1;
+
+    // Which username to use when establishing an SSH session.
+    // E.g. You can start a session from a terminal using `ssh <username>@<endpoint>`.
+    string username = 2;
+
+    // This SSH endpoint can be used to establish an SSH session with the instance.
+    // Make sure to also configure the corresponding username.
+    string endpoint = 3;
+
+    // The SSH server public host keys, encoded in the OpenSSH public key format.
+    // Clients can use these keys to verify the server at endpoint.
+    repeated bytes ssh_host_keys = 4;
+}
+
+message GetVNCConfigRequest {
+    // Required: which instance to provide VNC configuration for.
+    string instance_id = 1;
+}
+
+message GetVNCConfigResponse {
+    // The VNC endpoint exposed by the instance ingress.
+    string endpoint = 1;
+
+    // The username to use when authenticating to the VNC server, if required.
+    string username = 2;
+
+    // The password to use when authenticating to the VNC server, if required.
+    string password = 3;
+}
+
+message ReleaseUniqueTagRequest {
+    // The name of the unique tag to release.
+    string unique_tag = 1;
+
+    // If set, only release the unique tag if the currently associated instance ID matches this constraint.
+    //
+    // When running a container with `nsc_state_path` set, the parent instance ID is available via the environment variable NSC_INSTANCE_ID.
+    namespace.stdlib.StringMatcher if_instance_id = 2;
+}
+
+message ReleaseUniqueTagResponse {
+    // The ID of the instance that was released from the tag.
+    // If no instance was released, this field is not set.
+    string instance_id = 1;
+}
+
+message OptimizeImageRequest {
+    string image_ref = 1;
+    string site      = 2;
+    // If set, publishes this tag in the source image's repository after optimization succeeds.
+    // The tag points to the source image digest that was optimized.
+    string push_tag = 3;
+}
+
+message OptimizeImageProgress {
+    Status status            = 1;
+    string baker_instance_id = 2;
+    string failure_message   = 3;
+
+    enum Status {
+        STATUS_UNKNOWN = 0;
+        PREPARING      = 1;
+        STARTING       = 2;
+        BAKING         = 3;
+        DONE           = 4;
+        FAILED         = 5;
+    }
+}
+
+message InstanceEventMetadata {
+    google.protobuf.Timestamp       emitted_at  = 1;
+    string                          tenant_id   = 2;
+    string                          instance_id = 3;
+    InstanceMetadata.Status         status      = 4;
+    repeated namespace.stdlib.Label labels      = 5;
+}
+
+message ListInstanceNotificationsRequest {
+    // Optional filter to match instance IDs. If not set, returns events for
+    // all instances.
+    namespace.stdlib.StringMatcher instance_ids = 1;
+
+    // The maximum number of events to return. The list of events returned is
+    // always capped to an internal number.
+    int64 limit = 2;
+
+    // If set to true, only pending events that have not yet been delivered
+    // are returned.
+    bool only_pending_events = 3;
+}
+
+message ListInstanceNotificationsResponse {
+    // The list of events, ordered by emitted time in descending order (most
+    // recent first). Each instance has at most one event in the response.
+    repeated InstanceEventMetadata events = 1;
+}

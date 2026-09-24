@@ -1,0 +1,9 @@
+<div>
+  A deadline set on the instance at creation time, enforced by Namespace itself.
+  <p>
+    This is the backstop: even if Jenkins crashes, loses its token, or never
+    calls destroy, the instance is reclaimed at this deadline. Set it above your
+    longest build, but not far above &mdash; it bounds the cost of anything
+    going wrong.
+  </p>
+</div>

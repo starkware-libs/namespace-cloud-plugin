@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package namespace.cloud.iam.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/iam/v1beta";
+
+// Defines a permission grant on a resource. Permissions are used to restrict
+// what a token is allowed to do.
+//
+// See https://namespace.so/docs/security/permissions for a list of available
+// resource types and actions.
+message Permission {
+    // The type of resource this permission applies to, e.g. "instance",
+    // "vault/object", "token/revokable".
+    string resource_type = 1;
+    // The specific resource ID, or empty for all resources of this type.
+    string resource_id = 2;
+    // The set of actions allowed on the resource, e.g. "create", "list",
+    // "describe".
+    repeated string actions = 3;
+}
+
+// Represents a single access check: a specific action on a specific resource.
+message Access {
+    string resource_type = 1;
+    string resource_id   = 2;
+    string action        = 3;
+}
+
+// Returned as an error detail when a request is denied due to insufficient
+// permissions. Lists all the permissions that were missing.
+message PermissionDeniedError {
+    // The list of access permissions that the caller was missing.
+    repeated Access missing_access_permissions = 1;
+}

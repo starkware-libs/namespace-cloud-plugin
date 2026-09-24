@@ -1,0 +1,79 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+
+  <f:entry title="${%Profile name}" field="name"
+           description="${%Used as the agent name prefix, e.g. linux-8x16.}">
+    <f:textbox/>
+  </f:entry>
+
+  <f:entry title="${%vCPU}" field="vcpu"
+           description="${%Number of virtual CPUs.}">
+    <f:number default="4" min="1"/>
+  </f:entry>
+
+  <f:entry title="${%Memory} (GB)" field="memoryGb">
+    <f:number default="8" min="1"/>
+  </f:entry>
+
+  <f:entry title="${%Architecture}" field="arch">
+    <f:select/>
+  </f:entry>
+
+  <f:entry title="${%Jenkins labels}" field="labels"
+           description="${%Jobs asking for one of these labels get this profile, e.g. ns-linux-8x16.}">
+    <f:textbox/>
+  </f:entry>
+
+  <f:entry title="${%Launch method}" field="launchStrategy">
+    <f:dropdownDescriptorSelector field="launchStrategy" title="${%Launch method}"/>
+  </f:entry>
+
+  <f:entry title="${%Max lifetime} (minutes)" field="maxLifetimeMinutes"
+           description="${%Namespace destroys the instance at this deadline even if Jenkins never asks it to. This is the backstop against leaked instances.}">
+    <f:number default="120" min="1"/>
+  </f:entry>
+
+  <f:entry title="${%Idle timeout} (minutes)" field="idleMinutes"
+           description="${%Terminate the agent after this long with no build.}">
+    <f:number default="10" min="1"/>
+  </f:entry>
+
+  <f:entry title="${%Launch timeout} (seconds)" field="launchTimeoutSeconds"
+           description="${%How long to wait for the agent to connect back. If it does not, the instance is destroyed and provisioning fails rather than retrying forever.}">
+    <f:number default="300" min="30"/>
+  </f:entry>
+
+  <f:advanced>
+    <f:entry title="${%Executors}" field="numExecutors">
+      <f:number default="1" min="1"/>
+    </f:entry>
+
+    <f:entry title="${%Remote FS root}" field="remoteFs">
+      <f:textbox default="/home/jenkins/agent"/>
+    </f:entry>
+
+    <f:entry title="${%Instance cap for this profile}" field="instanceCap">
+      <f:number default="10" min="1"/>
+    </f:entry>
+
+    <f:entry title="${%Environment}" field="environment"
+             description="${%One KEY=VALUE per line, passed to the agent container.}">
+      <f:textarea/>
+    </f:entry>
+
+    <f:entry title="${%Cache volumes}" field="cacheVolumes"
+             description="${%One mountPoint:tag:sizeGb per line, e.g. /home/jenkins/.m2:maven:20. Instances sharing a tag reuse the cache.}">
+      <f:textarea/>
+    </f:entry>
+  </f:advanced>
+
+  <!-- f:repeatableProperty renders the Add button, but the delete control has
+       to come from the repeated item itself. Without this a profile can be
+       added and then never removed. -->
+  <f:entry title="">
+    <div align="right">
+      <f:repeatableDeleteButton value="${%Delete profile}"/>
+    </div>
+  </f:entry>
+
+</j:jelly>

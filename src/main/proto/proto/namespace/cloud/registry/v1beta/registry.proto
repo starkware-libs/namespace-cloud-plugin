@@ -1,0 +1,464 @@
+syntax = "proto3";
+
+package namespace.cloud.registry.v1beta;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "proto/namespace/stdlib/labels.proto";
+import "proto/namespace/stdlib/matchers.proto";
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/registry/v1beta";
+
+// ContainerRegistryService allows the management of container images stored in
+// the workspace's private container registry (`nscr.io`). It supports listing
+// images and repositories, managing tags, sharing images publicly or with
+// partner accounts, and configuring image expiration policies.
+//
+// See https://namespace.so/docs/architecture/storage/container-registry for an overview.
+//
+// ## Access
+//
+// ContainerRegistryService is a global service that can be accessed at:
+//
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls to the ContainerRegistryService require a *tenant token* passed as a Bearer token as
+// part of each call. These are always required.
+//
+// A *tenant token* identifies both the workspace that the call operates on, but
+// may also constrain the set of actions that the caller may do.
+//
+// A *tenant token* can be obtained using the
+// [IAM API](https://buf.build/namespace/cloud/docs/main:namespace.cloud.iam.v1beta).
+service ContainerRegistryService {
+    // Retrieves a specific image by repository and reference (tag or digest).
+    //
+    // ### Errors
+    // - If the image does not exist, a `NotFound` status is returned.
+    rpc GetImage(GetImageRequest) returns (GetImageResponse);
+
+    // Lists images in the registry that match the specified criteria.
+    rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+
+    // Lists all repositories in the registry.
+    rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
+
+    // Lists all tags for a specific repository.
+    rpc ListTags(ListTagsRequest) returns (ListTagsResponse);
+
+    // Lists all versions of a specific tag in a repository, ordered from newest
+    // to oldest. A tag can point to different images over time as it is
+    // overwritten by new pushes.
+    rpc ListTagVersions(ListTagVersionsRequest) returns (ListTagVersionsResponse);
+
+    // Shares an image either publicly or with tenants of partner accounts.
+    // Returns the shared image metadata, including the public image reference
+    // that can be used to pull the image.
+    //
+    // ### Errors
+    // - If the image does not exist, a `NotFound` status is returned.
+    rpc ShareImage(ShareImageRequest) returns (SharedImage);
+
+    // Removes an existing share, making the shared image reference inaccessible.
+    //
+    // ### Errors
+    // - If the share does not exist, a `NotFound` status is returned.
+    rpc UnshareImage(UnshareImageRequest) returns (google.protobuf.Empty);
+
+    // Lists shared images, optionally filtered by repository and visibility.
+    rpc ListSharedImages(ListSharedImagesRequest) returns (ListSharedImagesResponse);
+
+    // Extends or updates the expiration of a single image.
+    //
+    // ### Errors
+    // - If the image does not exist, a `NotFound` status is returned.
+    rpc UpdateImageLifetime(UpdateImageLifetimeRequest) returns (UpdateImageLifetimeResponse);
+
+    // Updates the default image expiration policy for the workspace.
+    // The policy applies to newly created images only.
+    rpc UpdateDefaultPolicy(UpdateDefaultPolicyRequest) returns (google.protobuf.Empty);
+
+    // Returns the current default image expiration policy.
+    rpc GetDefaultPolicy(google.protobuf.Empty) returns (GetDefaultPolicyResponse);
+
+    // Updates the image expiration policy for a specific repository.
+    // Repository-level policies override the default policy.
+    rpc UpdateRepositoryPolicy(UpdateRepositoryPolicyRequest) returns (google.protobuf.Empty);
+
+    // Returns the current image expiration policy for a specific repository.
+    rpc GetRepositoryPolicy(GetRepositoryPolicyRequest) returns (GetRepositoryPolicyResponse);
+}
+
+message ShareImageRequest {
+    // The repository that contains the image to be shared.
+    string repository = 1;
+
+    // The digest of the image to be shared.
+    string digest = 2;
+
+    // When the shared image should expire. Not setting this results in indefinitely shared images.
+    google.protobuf.Timestamp expires_at = 3;
+
+    // Defines who can access this shared image.
+    Visibility visibility = 4;
+
+    // The optional suffix does not have a practical purpose apart from making the image more operationally distinct.
+    // The resulting image reference will, for example, be: public.nscr.io/{meaningful_id}/{suffix}
+    string suffix = 5;
+}
+
+enum Visibility {
+    UNKNOWN_VISIBILITY = 0;
+
+    // Anyone can access the shared image provided they have access to the shared image reference.
+    PUBLIC = 1;
+
+    // Share the image with all tenants of the partner account of the tenant that owns the image.
+    PARTNER = 2;
+}
+
+message UnshareImageRequest {
+    // The unique identifier of the shared image to unshare.
+    string id = 1;
+}
+
+message ListSharedImagesRequest {
+    namespace.stdlib.StringMatcher match_repositories = 1;
+
+    // If set to UNKNOWN_VISIBILITY any image is returned.
+    Visibility match_visibility = 2;
+}
+
+message ListSharedImagesResponse {
+    repeated SharedImage shared_images = 1;
+}
+
+message SharedImage {
+    // The unique identifier of this shared image.
+    string id = 1;
+
+    // The repository that contains the shared image.
+    string shared_repository = 2;
+
+    // The digest of the shared image.
+    string shared_digest = 3;
+
+    // When this shared image expires.
+    google.protobuf.Timestamp expires_at = 4;
+
+    // The image reference used to access the shared image.
+    string image_ref = 5;
+
+    Visibility visibility = 6;
+
+    // The suffix that was provided when the shared image got created.
+    string suffix = 7;
+}
+
+message ListImagesRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return as part of this ListImages
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+
+    // Filter images by repository name. If not specified, images from all repositories are returned.
+    namespace.stdlib.StringMatcher match_repository = 3;
+
+    // Filter images by creation timestamp range.
+    namespace.stdlib.TimestampRange created_at = 4;
+}
+
+message ListImagesResponse {
+    repeated Image images = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListImages call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+message ListRepositoriesRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return as part of this ListRepositories
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+}
+
+message ListRepositoriesResponse {
+    repeated Repository repositories = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListRepositories call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+message Repository {
+    // The name of the repository.
+    string name = 1;
+
+    // The timestamp of the last push to this repository.
+    google.protobuf.Timestamp last_push = 2;
+}
+
+message ListTagsRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return as part of this ListTags
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+
+    // The repository to list tags from.
+    string repository = 3;
+}
+
+message ListTagsResponse {
+    repeated Tag tags = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListTags call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+message ListTagVersionsRequest {
+    // If a previous response returned a `pagination_cursor`, it can be
+    // specified to continue reading results with the same arguments as the
+    // original call.
+    bytes pagination_cursor = 1;
+
+    // The maximum number of entries to return as part of this ListTagVersions
+    // request. A maximum number of entries may also be specified when
+    // `pagination_cursor` is set.
+    //
+    // We won't return more than `max_entries`, but may return fewer.
+    int64 max_entries = 2;
+
+    // The repository containing the tag.
+    string repository = 3;
+
+    // The tag to list versions for.
+    string tag = 4;
+}
+
+message ListTagVersionsResponse {
+    // The versions of the tag, ordered from newest to oldest.
+    repeated Tag versions = 1;
+
+    // If set, there are additional results. Pass the same cursor to a
+    // subsequent ListTagVersions call to continue fetching results.
+    bytes pagination_cursor = 2;
+}
+
+message GetImageRequest {
+    // The repository containing the image.
+    string repository = 1;
+
+    // The reference to the image. Can be either a tag or a digest.
+    // Digests have the form sha256:<hash>.
+    string reference = 2;
+}
+
+message GetImageResponse {
+    Image image = 1;
+}
+
+message Image {
+    // The repository containing the image.
+    string repository = 1;
+
+    // The digest of the image.
+    string digest = 2;
+
+    // When the image was created.
+    google.protobuf.Timestamp created_at = 3;
+
+    // When the image expires. Not set if the image does not expire.
+    google.protobuf.Timestamp expires_at = 4;
+
+    // Size information for the image.
+    Sizes sizes = 5;
+
+    // If the image has been deleted, when it was deleted.
+    google.protobuf.Timestamp deleted_at = 6;
+
+    // Labels attached to this image.
+    repeated namespace.stdlib.Label labels = 7;
+
+    // Tags that reference this image.
+    repeated string tags = 8;
+
+    message Sizes {
+        // Total size of the image in bytes.
+        int64 total = 1;
+
+        // Size per platform in bytes. Keys are platform identifiers (e.g., "linux/amd64").
+        map<string, int64> per_platform = 2;
+    }
+}
+
+message Tag {
+    // The tag name.
+    string tag = 1;
+
+    // The image this tag points to.
+    Image image = 2;
+
+    // When the tag was created.
+    google.protobuf.Timestamp created_at = 3;
+}
+
+message UpdateImageLifetimeRequest {
+    // The repository containing the image.
+    string repository = 1;
+
+    // The digest of the image of the form sha256:<hash>.
+    string digest = 2;
+
+    // The duration the lifetime of this image should be extended by.
+    // If the image currently has no expiration then providing extend_by is not supported.
+    // Can not be used in combination with new_expiry.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration extend_by = 3;
+
+    // The minimum remaining duration this image should be alive for.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration ensure_minimum_remaining = 4;
+
+    // The new expiration timestamp (in UTC) at which the image expires.
+    // Can not be used in combination with extend_by.
+    //
+    // Note: In JSON format, the Timestamp type is encoded as a string in the
+    // [RFC 3339](https://www.ietf.org/rfc/rfc3339.txt) format.
+    google.protobuf.Timestamp new_expiry = 5;
+}
+
+message UpdateImageLifetimeResponse {
+    // A timestamp at which the image will expire.
+    google.protobuf.Timestamp new_expiry = 1;
+}
+
+// Controls whether image expiration is enforced.
+enum ExpirationEnforcement {
+    // Default behavior for backwards compatibility:
+    // - If an expiration duration is set, it is enforced.
+    // - If no expiration duration is set, images do not expire (same as EXPIRATION_ENFORCEMENT_DO_NOT_ENFORCE).
+    // Prefer setting an explicit enforcement value over this.
+    EXPIRATION_ENFORCEMENT_UNKNOWN = 0;
+
+    // Expiration is enforced. An expiration duration must be set.
+    EXPIRATION_ENFORCEMENT_ENFORCE = 1;
+
+    // Images do not expire, regardless of the expiration duration.
+    EXPIRATION_ENFORCEMENT_DO_NOT_ENFORCE = 2;
+}
+
+message UpdateDefaultPolicyRequest {
+    // Only update if revision matches.
+    int64 revision = 1;
+
+    // The new default expiration duration for newly created images.
+    // A duration of at least 4h (=14400s) is required.
+    // In order to apply the expiration retroactively to existing images reach out to `support@namespace.so`.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration default_expiration = 2;
+
+    // Controls whether expiration is enforced.
+    ExpirationEnforcement expiration_enforcement = 3;
+}
+
+message GetDefaultPolicyResponse {
+    // The current revision.
+    int64 revision = 1;
+
+    // The default expiration duration that is applied to newly created images.
+    // After this duration the image becomes inaccessible and the underlying blobs are deleted.
+    // Not set means no default policy is configured.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration default_expiration = 2;
+
+    // Controls whether expiration is enforced.
+    ExpirationEnforcement expiration_enforcement = 3;
+}
+
+message UpdateRepositoryPolicyRequest {
+    // The repository to configure.
+    string repository = 1;
+
+    // Only update if revision matches.
+    int64 revision = 2;
+
+    // The expiration duration for newly created images in this repository.
+    // A duration of at least 4h (=14400s) is required.
+    // If set, this overrides the default policy for images pushed to this repository.
+    // If not set, the default policy is used.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration expiration = 3;
+
+    // Controls whether expiration is enforced for this repository.
+    ExpirationEnforcement expiration_enforcement = 4;
+}
+
+message GetRepositoryPolicyRequest {
+    // The repository to get the policy for.
+    string repository = 1;
+}
+
+message GetRepositoryPolicyResponse {
+    // The current revision.
+    int64 revision = 1;
+
+    // The expiration duration that is applied to newly created images in this repository.
+    // Not set means the default policy is used.
+    //
+    // Note: In JSON format, the Duration type is encoded as a string rather than an
+    // object, where the string ends in the suffix "s" (indicating seconds) and
+    // is preceded by the number of seconds, with nanoseconds expressed as
+    // fractional seconds.
+    google.protobuf.Duration expiration = 2;
+
+    // Controls whether expiration is enforced for this repository.
+    ExpirationEnforcement expiration_enforcement = 3;
+}

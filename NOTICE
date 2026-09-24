@@ -1,0 +1,37 @@
+Namespace Cloud Agents plugin
+Copyright (c) 2026 the plugin contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+================================================================================
+Third-party material redistributed in this repository
+================================================================================
+
+Namespace API protocol buffer definitions
+-----------------------------------------
+Files:     src/main/proto/proto/namespace/**/*.proto
+Copyright: Namespace Labs Inc.
+License:   Apache License 2.0
+Source:    https://buf.build/namespace/cloud (public Buf module)
+           commit 5a62e786038e4588883ae84dddf4c9b9 (2026-09-15)
+
+These .proto files define Namespace's public API. They are redistributed here
+so the gRPC stubs can be generated at build time; Buf publishes no prebuilt
+Java SDK for this module, so vendoring is the only practical option.
+
+Namespace Labs publishes the generated Go bindings for these same definitions
+under the Apache License 2.0 at https://github.com/namespacelabs/integrations
+(see proto/namespace/... in that repository, and its root LICENSE).
+
+No modifications have been made to the .proto files. See
+src/main/proto/VENDORED.txt for the exact upstream commit and the subset
+vendored.
+
+A copy of the Apache License 2.0 is available at
+https://www.apache.org/licenses/LICENSE-2.0
+
+================================================================================
+
+This plugin is a community project. It is not affiliated with, endorsed by, or
+supported by Namespace Labs Inc. "Namespace" is used descriptively to identify
+the service the plugin integrates with.

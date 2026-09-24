@@ -1,0 +1,82 @@
+pipeline {
+    // This is the whole mechanism: ask for the label, and the Namespace cloud
+    // provisions an instance because no existing node can satisfy it.
+    // NOTE: this is the PROFILE's label, not the cloud's name.
+    agent { label 'linux-2x4' }
+
+    // Without this the build waits forever if an agent never connects.
+    // No timestamps() here: that option needs the Timestamper plugin, which
+    // this controller does not have installed.
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+    }
+
+    stages {
+        stage('Where am I?') {
+            steps {
+                sh '''
+                    echo "node      : ${NODE_NAME}"
+                    echo "hostname  : $(hostname)"
+                    echo "workspace : ${WORKSPACE}"
+                '''
+            }
+        }
+
+        stage('Shape matches the profile') {
+            steps {
+                sh '''
+                    echo "vCPU   : $(nproc)                 (profile says 2)"
+                    echo "memory : $(awk '/MemTotal/ {printf "%.1f GB", $2/1024/1024}' /proc/meminfo)   (profile says 4)"
+                    echo "arch   : $(uname -m)"
+                    echo "kernel : $(uname -r)"
+                    . /etc/os-release 2>/dev/null && echo "os     : ${PRETTY_NAME}"
+                '''
+            }
+        }
+
+        stage('Not the controller') {
+            steps {
+                sh '''
+                    if [ -d /var/jenkins_home ]; then
+                        echo "FAIL: this is the Jenkins controller, not a Namespace agent"
+                        exit 1
+                    fi
+                    echo "OK: running on a provisioned agent"
+                '''
+            }
+        }
+
+        stage('Workspace and network') {
+            steps {
+                sh '''
+                    echo "built on $(hostname) at $(date -u +%FT%TZ)" > proof.txt
+                    cat proof.txt
+
+                    if command -v curl >/dev/null 2>&1; then
+                        curl -sS -o /dev/null -w "egress : github.com -> HTTP %{http_code}\\n" -m 15 https://github.com \
+                            || echo "egress : FAILED"
+                    else
+                        echo "egress : curl not in this image, skipped"
+                    fi
+                '''
+            }
+        }
+
+        stage('Do some work') {
+            steps {
+                sh 'for i in 1 2 3 4 5; do echo "working $i/5"; sleep 2; done'
+            }
+        }
+    }
+
+    post {
+        success {
+            echo 'SUCCESS - the build ran on a Namespace instance.'
+        }
+        cleanup {
+            // The agent is single-use; Jenkins terminates it and the plugin
+            // destroys the instance once the idle timeout elapses.
+            echo "Finished on ${env.NODE_NAME}."
+        }
+    }
+}

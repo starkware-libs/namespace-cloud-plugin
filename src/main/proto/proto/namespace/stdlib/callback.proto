@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package namespace.stdlib;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/stdlib";
+
+message HttpCallbackEndpoint {
+    string post_url = 1;
+    repeated HttpHeader headers = 2;
+    // If present, the body of the callback response will
+    // be signed and provided as an HMAC hash using the specified
+    // secret. The X-Namespace-Signature header will include a
+    // value of the form `ts=<timestamp>,sha256=<hmac>`, where <hmac> is
+    // a SHA256-signed message consisting of `<timestamp>,<response body>`.
+    string sign_with_secret_id = 3;
+}
+
+message HttpHeader {
+    string name = 1;
+    string value = 2;
+    ResolvableValue value_from = 3;
+}
+
+message ResolvableValue {
+    string static = 1;
+    string from_secret_id = 2;
+}

@@ -1,0 +1,32 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:f="/lib/form">
+
+  <f:entry>
+    <div class="jenkins-form-description">
+      ${%This method needs the extra "instance: ssh" and "ingress: access" grants on the
+        Namespace token, and egress from the controller to the Namespace ingress.}
+    </div>
+  </f:entry>
+
+  <f:entry title="${%Agent image}" field="image"
+           description="${%Must contain a JRE; the controller copies agent.jar into it.}">
+    <f:combobox default="jenkins/inbound-agent:latest-jdk21"/>
+  </f:entry>
+
+  <f:entry title="${%SSH private key}" field="credentialsId">
+    <c:select xmlns:c="/lib/credentials"/>
+  </f:entry>
+
+  <f:entry title="${%Authorized public key}" field="authorizedKey"
+           description="${%The public half of the key above. Injected into the instance so Namespace accepts the connection.}">
+    <f:textarea/>
+  </f:entry>
+
+  <f:advanced>
+    <f:entry title="${%Java path}" field="javaPath"
+             description="${%Leave blank to let Jenkins find java on PATH.}">
+      <f:textbox/>
+    </f:entry>
+  </f:advanced>
+
+</j:jelly>

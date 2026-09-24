@@ -1,0 +1,11 @@
+<div>
+  How long to wait for the agent to connect after the instance reaches RUNNING.
+  <p>
+    If it does not connect in time the instance is destroyed and provisioning
+    fails with a diagnostic. This is what stops a dead agent turning into dozens
+    of paid instances: Jenkins will not start another launch while one is
+    pending, so a broken image or an unreachable Jenkins URL costs one instance
+    per timeout rather than one every few seconds.
+  </p>
+  <p>Allow time for the instance to boot and pull the image; 300s is a sane default.</p>
+</div>

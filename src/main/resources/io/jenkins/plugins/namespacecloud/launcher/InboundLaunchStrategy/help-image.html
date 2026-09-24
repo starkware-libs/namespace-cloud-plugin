@@ -1,0 +1,17 @@
+<div>
+  Container image that runs the Jenkins inbound agent.
+  <p>
+    The list offers the stock images plus anything in your workspace registry,
+    but any image reference is accepted &mdash; type one if it is not listed.
+  </p>
+  <p>
+    <b>It must be based on <code>jenkins/inbound-agent</code>, and must not
+    override <code>ENTRYPOINT</code> or <code>CMD</code>.</b> The plugin injects
+    <code>JENKINS_URL</code>, <code>JENKINS_SECRET</code> and
+    <code>JENKINS_AGENT_NAME</code> and relies on that entrypoint to launch
+    <code>agent.jar</code>. An image without it starts, sits idle, never
+    connects, and fails at the launch timeout &mdash; which looks like a network
+    problem but is not.
+  </p>
+  <p>Match the image's JDK to the controller's Java major version.</p>
+</div>

@@ -1,0 +1,20 @@
+<div>
+  Your Namespace workspace (project/tenant) id &mdash; the segment between the
+  registry host and the repository name:
+  <pre>nscr.io/<b>abc012abc012</b>/jenkins-agent:1.0</pre>
+  <p>
+    Find it with <code>nsc registry list</code>, or read it off any image
+    reference you have already pushed.
+  </p>
+  <p>
+    <b>Why this cannot be detected automatically:</b> the registry API returns
+    bare repository names and the tenant is implicit in the token. Every RPC
+    that would reveal the tenant id requires an admin or partner token, which a
+    least-privileged Jenkins token deliberately is not.
+  </p>
+  <p>
+    Leave it blank and the plugin still works, but the <i>Agent image</i>
+    suggestion list produces references without the workspace segment, which
+    Namespace rejects with <code>failed to resolve image</code>.
+  </p>
+</div>

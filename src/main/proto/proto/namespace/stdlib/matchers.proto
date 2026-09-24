@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package namespace.stdlib;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/stdlib";
+
+import "google/protobuf/timestamp.proto";
+
+message StringMatcher {
+    repeated string values = 1;
+    Operator        op     = 2;
+
+    enum Operator {
+        OPERATOR_UNKNOWN = 0;
+        IS_ANY_OF        = 1;
+        IS_NOT           = 2;
+    }
+}
+
+message Int64Matcher {
+    repeated int64 values = 1;
+    Operator       op     = 2;
+
+    enum Operator {
+        OPERATOR_UNKNOWN = 0;
+        IS_ANY_OF        = 1;
+        IS_NOT           = 2;
+    }
+}
+
+message TimestampRange {
+    google.protobuf.Timestamp after  = 1;
+    google.protobuf.Timestamp before = 2;
+}
+
+message Int64Range {
+    int64 low  = 1;  // Inclusive.
+    int64 high = 2;  // Inclusive.
+}

@@ -1,0 +1,10 @@
+<div>
+  The URL injected into each agent as <code>JENKINS_URL</code>. Defaults to the
+  globally configured Jenkins URL.
+  <p>
+    <b>It must be reachable from inside Namespace's cloud.</b> A controller on
+    <code>localhost</code> or a cluster-internal Service name cannot be reached
+    by an instance, so the agent boots, fails to connect, and the launch times
+    out. Set this when the global Jenkins URL is internal-only.
+  </p>
+</div>

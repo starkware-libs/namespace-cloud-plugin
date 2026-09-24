@@ -1,0 +1,9 @@
+<div>
+  Connect over WebSocket on the HTTP(S) port instead of the JNLP TCP port.
+  <p>
+    Recommended: it needs only port 443 through your ingress, so the JNLP port
+    need not be exposed at all. If you terminate TLS at a proxy, allow long-lived
+    upgrades &mdash; nginx's default 60s read timeout will drop the connection
+    and leave the agent reconnecting in a loop.
+  </p>
+</div>

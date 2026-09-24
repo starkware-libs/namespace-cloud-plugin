@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: jenkins-ns
+  labels:
+    app.kubernetes.io/name: jenkins
+  annotations:
+    # Container-native load balancing: the GCE LB targets pods directly.
+    # This is how the other ingresses on this cluster are wired.
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "jenkins"}'
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: jenkins
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

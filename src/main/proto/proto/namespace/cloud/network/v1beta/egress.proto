@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package namespace.cloud.network.v1beta;
+
+option go_package = "namespacelabs.dev/internal/public/gen/proto/namespace/cloud/network/v1beta";
+
+import "proto/namespace/stdlib/callback.proto";
+
+// EgressPolicyService manages workspace-wide egress policies that can be
+// applied to compute instances and other workloads by tag.
+//
+// ## Access
+//
+// This service is available at the global endpoint:
+// ```
+// https://global.namespaceapis.com:443
+// ```
+//
+// ## Authentication
+//
+// Calls require a tenant token passed as a Bearer token.
+service EgressPolicyService {
+    // Creates a new egress policy. The policy tag must be unique within the
+    // workspace.
+    rpc CreateEgressPolicy(CreateEgressPolicyRequest) returns (CreateEgressPolicyResponse);
+
+    // Replaces an existing egress policy.
+    rpc UpdateEgressPolicy(UpdateEgressPolicyRequest) returns (UpdateEgressPolicyResponse);
+
+    // Returns an egress policy by tag.
+    rpc GetEgressPolicy(GetEgressPolicyRequest) returns (GetEgressPolicyResponse);
+
+    // Lists all egress policies in the workspace.
+    rpc ListEgressPolicies(ListEgressPoliciesRequest) returns (ListEgressPoliciesResponse);
+}
+
+message CreateEgressPolicyRequest {
+    EgressPolicy policy = 1;
+}
+
+message CreateEgressPolicyResponse {
+    // The revision of the created policy.
+    int64 revision = 1;
+}
+
+message UpdateEgressPolicyRequest {
+    EgressPolicy policy = 1;
+
+    // Only update if the policy revision matches. Obtain the current value from
+    // GetEgressPolicy.
+    int64 match_revision = 2;
+}
+
+message UpdateEgressPolicyResponse {
+    // The revision of the updated policy.
+    int64 revision = 1;
+}
+
+message GetEgressPolicyRequest {
+    string tag = 1;
+}
+
+message GetEgressPolicyResponse {
+    EgressPolicy policy = 1;
+    // The current revision of the policy.
+    int64        revision = 2;
+}
+
+message ListEgressPoliciesRequest {}
+
+message ListEgressPoliciesResponse {
+    repeated EgressPolicyEntry policies = 1;
+
+    message EgressPolicyEntry {
+        EgressPolicy policy = 1;
+
+        // The current revision of the policy.
+        int64 revision = 2;
+    }
+}
+
+message EgressPolicy {
+    // Workspace-unique tag used to reference this policy from workloads.
+    string tag = 1;
+
+    string description = 2;
+
+    EgressPolicySpec spec = 3;
+}
+
+message EgressPolicySpec {
+    Mode mode = 2;
+
+    // Enables HTTP and HTTPS interception for PROXY and INJECT rules.
+    bool deep_packet_inspection = 3;
+
+    // Rules applied in order to outbound connections.
+    repeated Rule rules = 4;
+
+    // Tags of Namespace-managed egress rulesets appended to rules.
+    repeated string additional_rulesets = 5;
+
+    // Deprecated. Only supported in inline egress policies during instance
+    // creation. Use `ALLOW` rules instead.
+    repeated string allowed_egress_domains = 1 [deprecated = true];
+
+    enum Mode {
+        MODE_UNKNOWN = 0;
+        DISABLED     = 1;
+        ALLOW_ALL    = 2;
+        ADVISORY     = 3;
+        BLOCK        = 4;
+    }
+
+    message Rule {
+        RuleOp    op      = 1;
+        Matcher   matcher = 2;
+        AllowOpts allow   = 3;
+        ProxyOpts proxy   = 4;
+        InjectOpts inject = 5;
+
+        enum RuleOp {
+            RULE_OP_UNKNOWN = 0;
+            ALLOW           = 1;
+            PROXY           = 2;
+            INJECT          = 3;
+        }
+    }
+
+    message Matcher {
+        repeated string match_domains = 1;
+    }
+
+    message AllowOpts {}
+
+    message ProxyOpts {
+        string via_domain = 1;
+    }
+
+    message InjectOpts {
+        string header_name = 1;
+
+        // Exactly one value source must be set.
+        string       from_secret_id = 2; // References a Vault secret.
+        string       value          = 3; // Plaintext value.
+        FromEndpoint from_endpoint  = 4; // Fetches the value to inject from an HTTP endpoint using GET.
+
+        ResolutionPolicy resolution_policy = 5;
+
+        enum ResolutionPolicy {
+            RESOLUTION_POLICY_UNKNOWN    = 0; // Default to once.
+            RESOLUTION_POLICY_ONCE       = 1; // Resolve once and keep using that value.
+            RESOLUTION_POLICY_WHEN_STALE = 2; // Cache until stale, then refresh. Staleness follows the Cache-Control: max-age returned by from_endpoint, with a minimum of 10s. Requires from_endpoint.
+        }
+
+        message FromEndpoint {
+            string                               url     = 1;
+            repeated namespace.stdlib.HttpHeader headers = 2;
+        }
+    }
+}

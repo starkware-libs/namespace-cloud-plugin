@@ -1,0 +1,11 @@
+<div>
+  Namespace cache volumes, one per line:
+  <pre>mountPoint:tag:sizeGb</pre>
+  for example
+  <pre>/home/jenkins/.m2:maven:20</pre>
+  <p>
+    Instances sharing a <b>tag</b> reuse the same cache, which is where most of
+    the speed benefit of running on Namespace comes from. Size is in GB; omit it
+    to default to 10.
+  </p>
+</div>

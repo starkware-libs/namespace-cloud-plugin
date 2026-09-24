@@ -1,0 +1,29 @@
+# Optional: paste this under `jenkins:` in 40-jcasc-configmap.yaml AFTER
+# namespace-cloud.hpi is installed, to manage the cloud declaratively instead
+# of through the UI. Verified against the plugin by booting it in a container.
+      clouds:
+        - namespace:
+            name: "Namespace_Runners"
+            credentialsId: "namespace-token"
+            # Selects the regional ComputeService host. "us" -> us.compute.namespaceapis.com.
+            # This is the API endpoint, NOT instance placement; leave
+            # instanceRegion unset so Namespace picks a site with capacity.
+            region: "us"
+            instanceCap: 20
+            templates:
+              - name: "ns-linux-4x8"
+                labels: "ns-linux-4x8"
+                vcpu: 4
+                memoryGb: 8
+                arch: "amd64"
+                numExecutors: 1
+                remoteFs: "/home/jenkins/agent"
+                idleMinutes: 10
+                maxLifetimeMinutes: 120
+                launchTimeoutSeconds: 300
+                instanceCap: 10
+                launchStrategy:
+                  inbound:
+                    image: "jenkins/inbound-agent:latest-jdk21"
+                    webSocket: true
+

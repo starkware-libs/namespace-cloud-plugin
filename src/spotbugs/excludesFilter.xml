@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SpotBugs exclusions.
+
+  The only entry here excludes protoc-generated stubs. They are regenerated
+  from src/main/proto on every build and are not ours to fix; SpotBugs flags
+  SE_BAD_FIELD on every generated message because protobuf's Serializable
+  support does not match its heuristics. Nothing in the plugin's own code is
+  excluded.
+-->
+<FindBugsFilter>
+  <Match>
+    <Package name="~namespace\..*"/>
+  </Match>
+</FindBugsFilter>

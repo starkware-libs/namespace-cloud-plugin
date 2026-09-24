@@ -1,0 +1,11 @@
+Vendored from buf.build/namespace/cloud
+commit 5a62e786038e4588883ae84dddf4c9b9 (2026-09-15)
+
+Transitive closure of:
+  proto/namespace/cloud/compute/v1beta/compute.proto   (ComputeService)
+  proto/namespace/cloud/iam/v1beta/authz.proto         (PermissionDeniedError)
+
+Buf publishes no prebuilt Java SDK for this module (its Maven registry
+returns 422), so protobuf-maven-plugin generates the stubs at build time.
+
+To refresh, see the "Protobuf stubs" section of the top-level README.

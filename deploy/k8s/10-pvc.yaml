@@ -1,0 +1,12 @@
+# JENKINS_HOME. Jenkins is not HA: one replica, ReadWriteOnce.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-home
+  namespace: jenkins-ns
+spec:
+  accessModes: [ReadWriteOnce]
+  # storageClassName: standard-rwo   # TODO confirm storage class
+  resources:
+    requests:
+      storage: 20Gi

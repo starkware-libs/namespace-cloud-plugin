@@ -1,0 +1,12 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core">
+  <div>
+    Provisions ephemeral Jenkins agents as Namespace micro-VM instances.
+    Define machine profiles once, label them, and jobs that ask for a label get
+    a fresh instance for the build and nothing left running afterwards.
+    <p>
+      Community plugin. Not affiliated with, endorsed by, or supported by
+      Namespace Labs.
+    </p>
+  </div>
+</j:jelly>
