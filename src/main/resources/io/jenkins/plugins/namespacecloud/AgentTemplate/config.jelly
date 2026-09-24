@@ -24,9 +24,9 @@
     <f:textbox/>
   </f:entry>
 
-  <f:entry title="${%Launch method}" field="launchStrategy">
-    <f:dropdownDescriptorSelector field="launchStrategy" title="${%Launch method}"/>
-  </f:entry>
+  <!-- dropdownDescriptorSelector renders its own titled row; wrapping it in an
+       f:entry with the same title showed "Launch method" twice. -->
+  <f:dropdownDescriptorSelector field="launchStrategy" title="${%Launch method}"/>
 
   <f:entry title="${%Max lifetime} (minutes)" field="maxLifetimeMinutes"
            description="${%Namespace destroys the instance at this deadline even if Jenkins never asks it to. This is the backstop against leaked instances.}">
