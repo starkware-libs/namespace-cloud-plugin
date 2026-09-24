@@ -7,11 +7,10 @@
  * plugin is built.
  */
 buildPlugin(
-    // Run the full build on the oldest supported LTS, and a second pass on the
-    // newest, so a Java or core incompatibility shows up before release.
+    // The hosting checker requires jdk to be one of [21, 25].
     useContainerAgent: true,
     configurations: [
         [platform: 'linux',   jdk: 21],
-        [platform: 'windows', jdk: 17],
+        [platform: 'windows', jdk: 25],
     ]
 )

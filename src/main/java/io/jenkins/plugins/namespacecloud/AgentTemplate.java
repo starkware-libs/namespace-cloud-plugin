@@ -14,11 +14,13 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import jenkins.model.Jenkins;
 import namespace.cloud.compute.v1beta.Compute;
 import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * A machine profile: the shape of instance to create, and how to connect to it,
@@ -280,7 +282,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return "Namespace agent profile";
         }
 
+        @POST
         public FormValidation doCheckName(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.error("Required. Used as the agent name prefix.");
             }
@@ -290,7 +294,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckLabels(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.warning(
                         "Without a label this profile only serves jobs with no label restriction.");
@@ -298,7 +304,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckVcpu(@QueryParameter int value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value < 1) {
                 return FormValidation.error("At least 1 vCPU.");
             }
@@ -309,7 +317,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
          * Namespace bills by shape, and a lopsided vCPU:memory ratio is usually
          * a typo rather than an intent, so warn without blocking.
          */
+        @POST
         public FormValidation doCheckMemoryGb(@QueryParameter int value, @QueryParameter int vcpu) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value < 1) {
                 return FormValidation.error("At least 1 GB.");
             }
@@ -323,14 +333,18 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckLaunchTimeoutSeconds(@QueryParameter int value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value < 30) {
                 return FormValidation.error("At least 30s; an instance needs time to boot and pull the agent image.");
             }
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckMaxLifetimeMinutes(@QueryParameter int value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value < 1) {
                 return FormValidation.error(
                         "Must be positive. This is the instance deadline Namespace enforces server-side.");
@@ -338,7 +352,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckCacheVolumes(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.ok();
             }
@@ -362,7 +378,9 @@ public class AgentTemplate extends AbstractDescribableImpl<AgentTemplate> {
             return FormValidation.ok();
         }
 
+        @POST
         public ListBoxModel doFillArchItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel m = new ListBoxModel();
             m.add("x86-64 (amd64)", "amd64");
             m.add("ARM64 (arm64)", "arm64");

@@ -5,7 +5,7 @@
   <parent>
     <groupId>org.jenkins-ci.plugins</groupId>
     <artifactId>plugin</artifactId>
-    <version>5.31</version>
+    <version>6.2236.v12dd4c483242</version>
     <relativePath />
   </parent>
 
@@ -20,7 +20,7 @@
   <!-- Lives at starkware-libs while hosting is requested. If the Jenkins
        project accepts it, the repository moves to
        github.com/starkware-libs/namespace-cloud-plugin and these URLs change. -->
-  <url>https://github.com/starkware-libs/namespace-cloud-plugin</url>
+  <url>https://github.com/jenkinsci/${project.artifactId}-plugin</url>
 
   <licenses>
     <license>
@@ -29,16 +29,6 @@
       <distribution>repo</distribution>
     </license>
   </licenses>
-
-  <developers>
-    <developer>
-      <id>sobhe-Starkware</id>
-      <name>Sobhe Higaze</name>
-      <roles>
-        <role>maintainer</role>
-      </roles>
-    </developer>
-  </developers>
 
   <scm>
     <connection>scm:git:https://github.com/starkware-libs/namespace-cloud-plugin.git</connection>
@@ -57,7 +47,21 @@
          incrementals build at release time. See
          https://www.jenkins.io/doc/developer/publishing/releasing-cd/ -->
     <changelist>999999-SNAPSHOT</changelist>
-    <jenkins.baseline>2.516</jenkins.baseline>
+    <!-- Required by the Jenkins hosting checker: these gates catch accidental
+         library bundling, redundant dependency overrides, and use of APIs that
+         core already provides or has deprecated. -->
+    <hpi.strictBundledArtifacts>true</hpi.strictBundledArtifacts>
+    <!-- The Namespace API is gRPC, and core provides neither gRPC nor protobuf,
+         so both are bundled along with their transitive dependencies. They are
+         masked in maven-hpi-plugin configuration so they cannot resolve against
+         another plugin's copy. Declared explicitly so that anything NEW showing
+         up here fails the build rather than being bundled by accident. -->
+    <hpi.bundledArtifacts>animal-sniffer-annotations,annotations,error_prone_annotations,failureaccess,grpc-api,grpc-context,grpc-core,grpc-netty-shaded,grpc-protobuf,grpc-protobuf-lite,grpc-stub,grpc-util,gson,guava,j2objc-annotations,listenablefuture,perfmark-api,proto-google-common-protos,protobuf-java</hpi.bundledArtifacts>
+    <banObsoleteDependencyOverrides.skip>false</banObsoleteDependencyOverrides.skip>
+    <ban-junit4-imports.skip>false</ban-junit4-imports.skip>
+    <ban-deprecated-stapler.skip>false</ban-deprecated-stapler.skip>
+    <ban-commons-lang-2.skip>false</ban-commons-lang-2.skip>
+    <jenkins.baseline>2.541</jenkins.baseline>
     <jenkins.version>${jenkins.baseline}.3</jenkins.version>
     <grpc.version>1.84.0</grpc.version>
     <!-- Buf does not publish prebuilt Java SDKs for buf.build/namespace/cloud
@@ -82,7 +86,7 @@
       <dependency>
         <groupId>io.jenkins.tools.bom</groupId>
         <artifactId>bom-${jenkins.baseline}.x</artifactId>
-        <version>6210.v69ea_fd8a_f010</version>
+        <version>7002.v028a_3607ddc8</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

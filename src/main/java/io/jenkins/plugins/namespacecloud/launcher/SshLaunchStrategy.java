@@ -26,6 +26,7 @@ import org.kohsuke.stapler.AncestorInPath;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * Connects by SSH from the controller into the instance.
@@ -48,7 +49,12 @@ public class SshLaunchStrategy extends AgentLaunchStrategy {
 
     private String image = DEFAULT_IMAGE;
     private String credentialsId;
+    // False positive: this holds the PUBLIC half of an SSH keypair, which is
+    // published to the instance on purpose and is not a secret. The CodeQL rule
+    // matches on field name and type alone.
+    @SuppressWarnings("lgtm[jenkins/plaintext-storage]")
     private String authorizedKey;
+
     private String javaPath;
 
     @DataBoundConstructor
@@ -153,7 +159,9 @@ public class SshLaunchStrategy extends AgentLaunchStrategy {
             return "SSH into the instance";
         }
 
+        @POST
         public ListBoxModel doFillCredentialsIdItems(@AncestorInPath Item item, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             StandardListBoxModel result = new StandardListBoxModel();
             if (item == null) {
                 if (!Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
@@ -172,12 +180,15 @@ public class SshLaunchStrategy extends AgentLaunchStrategy {
                     .includeCurrentValue(credentialsId);
         }
 
+        @POST
         public hudson.util.ComboBoxModel doFillImageItems(
                 @hudson.RelativePath("../..") @QueryParameter String credentialsId) {
             return AgentImages.suggest(credentialsId);
         }
 
+        @POST
         public FormValidation doCheckAuthorizedKey(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.error("Required: Namespace authorises SSH against this public key.");
             }
@@ -188,7 +199,9 @@ public class SshLaunchStrategy extends AgentLaunchStrategy {
             return FormValidation.ok();
         }
 
+        @POST
         public FormValidation doCheckCredentialsId(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.error("Select the private key matching the authorized key above.");
             }

@@ -50,6 +50,7 @@ import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.interceptor.RequirePOST;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * A Jenkins cloud that provisions agents as Namespace instances.
@@ -565,7 +566,9 @@ public class NamespaceCloud extends Cloud {
             return "Namespace";
         }
 
+        @POST
         public ListBoxModel doFillCredentialsIdItems(@AncestorInPath Item item, @QueryParameter String credentialsId) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             StandardListBoxModel result = new StandardListBoxModel();
             if (item == null && !Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
                 return result.includeCurrentValue(credentialsId);
@@ -625,14 +628,18 @@ public class NamespaceCloud extends Cloud {
             }
         }
 
+        @POST
         public ListBoxModel doFillRegionItems() {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             ListBoxModel m = new ListBoxModel();
             m.add("US \u2014 us.compute.namespaceapis.com", "us");
             m.add("EU \u2014 eu.compute.namespaceapis.com", "eu");
             return m;
         }
 
+        @POST
         public FormValidation doCheckComputeEndpointOverride(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
             if (value == null || value.isBlank()) {
                 return FormValidation.ok();
             }

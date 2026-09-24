@@ -14,6 +14,7 @@ import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.verb.POST;
 
 /**
  * Runs the Jenkins inbound agent as a Namespace-managed container, which dials
@@ -124,11 +125,13 @@ public class InboundLaunchStrategy extends AgentLaunchStrategy {
          * registry. The cloud's credential lives two levels up in the form
          * (cloud -> template -> launch strategy).
          */
+        @POST
         public ComboBoxModel doFillImageItems(@RelativePath("../..") @QueryParameter String credentialsId) {
             return AgentImages.suggest(credentialsId);
         }
 
         /** Says why the suggestion list looks the way it does. */
+        @POST
         public hudson.util.FormValidation doCheckImage(
                 @RelativePath("../..") @QueryParameter String credentialsId, @QueryParameter String value) {
             if (value == null || value.isBlank()) {
