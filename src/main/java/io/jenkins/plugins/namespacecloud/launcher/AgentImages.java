@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
 
 /**
  * Builds the agent-image suggestion list shown on a profile.
@@ -43,6 +44,14 @@ public final class AgentImages {
         Set<String> out = new LinkedHashSet<>();
         out.add(CLEAN_JDK21);
         out.add(CLEAN_JDK17);
+
+        // Listing the workspace registry reveals what images an organisation
+        // builds, and it spends a stored credential to do so. Neither should be
+        // available to a user who cannot administer Jenkins; they still get the
+        // stock images, so the form stays usable.
+        if (!Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
+            return toModel(out);
+        }
 
         NamespaceCloud cloud = owningCloud(credentialsId);
         Secret token = cloud == null
@@ -110,6 +119,9 @@ public final class AgentImages {
      * whether the registry is empty or the lookup failed.
      */
     public static hudson.util.FormValidation describeAvailability(@CheckForNull String credentialsId) {
+        if (!Jenkins.get().hasPermission(Jenkins.ADMINISTER)) {
+            return hudson.util.FormValidation.ok();
+        }
         Secret token = resolveAnyToken(credentialsId);
         if (token == null) {
             return hudson.util.FormValidation.warning("No usable Namespace token found, so only the stock images are "
